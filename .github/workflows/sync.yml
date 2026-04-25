@@ -1,0 +1,100 @@
+name: TR Sync
+run-name: "TR Sync — ${{ github.event.inputs.mode || 'manual' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Modo de ejecución"
+        required: false
+        default: "normal"
+        type: choice
+        options:
+          - normal
+          - dry-run
+          - init
+          - portfolio
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore pytr session (seed from secret)
+        env:
+          PYTR_KEYS_B64: ${{ secrets.PYTR_KEYS_B64 }}
+        run: |
+          echo "$PYTR_KEYS_B64" | base64 -d | tar -xzf - -C "$HOME"
+          ls -la "$HOME/.pytr/"
+
+      - name: Restore gspread auth
+        env:
+          GSPREAD_AUTH_B64: ${{ secrets.GSPREAD_AUTH_B64 }}
+        run: |
+          mkdir -p "$HOME/.config"
+          echo "$GSPREAD_AUTH_B64" | base64 -d | tar -xzf - -C "$HOME/.config"
+          ls -la "$HOME/.config/gspread/"
+
+      - name: Run sync
+        run: |
+          case "${{ github.event.inputs.mode }}" in
+            dry-run)   python tr_sync.py --dry-run ;;
+            init)      python tr_sync.py --init ;;
+            portfolio) python tr_sync.py --portfolio ;;
+            *)         python tr_sync.py ;;
+          esac
+
+      - name: Open/update issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'TR Sync falló — revisar sesión';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `Run: ${runUrl}`,
+              `Fecha: ${new Date().toISOString()}`,
+              ``,
+              `Causa probable: cookie de Trade Republic caducada.`,
+              ``,
+              `Acción: ejecuta \`make all\` localmente (login con 2FA + sync + portfolio + sube cookie nueva).`,
+            ].join('\n');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }

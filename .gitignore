@@ -1,0 +1,13 @@
+.venv/
+.pytr_data/
+__pycache__/
+*.pyc
+.DS_Store
+*.json
+*.log
+
+# Config personal del usuario (cada uno debe crear su propio config.yaml a partir de config.example.yaml).
+config.yaml
+
+# Makefile.local: variables específicas del entorno del usuario (REPO de GitHub, etc.).
+Makefile.local
