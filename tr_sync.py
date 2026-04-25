@@ -61,13 +61,21 @@ class ConfigError(Exception):
     """Error de configuración con mensaje accionable para el usuario."""
 
 
-def _validate_config(cfg, source_path):
-    """Comprueba que el config tiene los campos críticos. Lanza ConfigError si no."""
+def _validate_config(cfg, source_path, *, allow_placeholders=False):
+    """Comprueba que el config tiene los campos críticos. Lanza ConfigError si no.
+
+    Si `allow_placeholders=True` (caso fallback de config.example.yaml en CI / tests),
+    se acepta `sheet_id` con su valor placeholder sin error — el usuario real verá el
+    warning de "no se encuentra config.yaml" en stderr, pero los tests no rompen.
+    """
     errors = []
 
     sheet_id = cfg.get("sheet_id")
-    if not sheet_id or sheet_id.startswith("REEMPLAZA") or sheet_id.startswith("REPLACE_"):
-        errors.append("• `sheet_id` falta o sigue con el placeholder. Pon el ID de tu Google Sheet.")
+    is_placeholder = sheet_id and (sheet_id.startswith("REEMPLAZA") or sheet_id.startswith("REPLACE_"))
+    if not sheet_id:
+        errors.append("• `sheet_id` falta. Pon el ID de tu Google Sheet.")
+    elif is_placeholder and not allow_placeholders:
+        errors.append("• `sheet_id` sigue con el placeholder. Pon el ID de tu Google Sheet.")
 
     sheets = cfg.get("sheets") or {}
     for required in ("expenses", "income", "investments_year_format", "portfolio", "status", "sync_state"):
@@ -105,6 +113,7 @@ def _load_config():
     here = Path(__file__).resolve().parent
     real = here / "config.yaml"
     example = here / "config.example.yaml"
+    using_example = False
     if real.exists():
         path = real
     elif example.exists():
@@ -113,13 +122,14 @@ def _load_config():
             f"   Copia config.example.yaml a config.yaml y rellénalo con los tuyos.\n"
         )
         path = example
+        using_example = True
     else:
         raise FileNotFoundError(
             f"Falta config.yaml. Copia config.example.yaml → config.yaml y rellénalo."
         )
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
-    _validate_config(cfg, path)
+    _validate_config(cfg, path, allow_placeholders=using_example)
     return cfg
 
 
