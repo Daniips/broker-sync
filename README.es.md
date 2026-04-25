@@ -259,14 +259,25 @@ El repo trae `.github/workflows/sync.yml` que puede sincronizar a diario sin tu 
 ## Estructura del repo
 
 ```
-tr_sync.py             — script principal (sync + portfolio + renta)
-inspect_events.py      — utilidad de inspección de eventos brutos
+tr_sync.py             — entry point de Trade Republic (sync + portfolio + renta)
+inspect_events.py      — utilidad de inspección de eventos brutos (específico de TR)
+config_cli.py          — CLI interactiva para gestionar config.yaml
 test_tr_sync.py        — tests unitarios (sin red, deterministas)
+
+core/                  — código agnóstico del broker
+  utils.py             — helpers de números / rangos A1
+  fifo.py              — motor FIFO genérico
+
+brokers/tr/            — código específico de Trade Republic
+  parser.py            — parsers de eventos TR
+
 config.example.yaml    — plantilla de configuración (commiteable)
 config.yaml            — TU config personal (gitignored)
 Makefile               — atajos de make
 Makefile.local         — variables locales (gitignored, opcional)
-README.md              — este fichero
+README.md              — versión inglés
+README.es.md           — este fichero
+ARCHITECTURE.md        — arquitectura multi-broker (bilingüe)
 CONFIG.md              — referencia de cada campo de config.yaml
 SHEET_TEMPLATE.md      — estructura esperada del Google Sheet
 RENTA.md               — guía detallada del informe IRPF

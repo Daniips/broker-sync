@@ -734,23 +734,12 @@ def _sync_ledger_layout(spreadsheet, sheet_name, txs, dry_run):
 
 # ── Orquestación ──────────────────────────────────────────────────────────
 
-def _parse_a1_column_range(rng):
-    """Parsea 'C2:C8' → ('C', 2, 8). Devuelve (None, None, None) si no es columna única."""
-    m = re.match(r"^([A-Z]+)(\d+):([A-Z]+)(\d+)$", str(rng or ""))
-    if not m:
-        return None, None, None
-    col_start, row_start, col_end, row_end = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
-    if col_start != col_end:
-        return None, None, None
-    return col_start, row_start, row_end
-
-
-def _column_letter_to_index(letter):
-    """A→1, B→2, ..., Z→26, AA→27, ..."""
-    n = 0
-    for c in letter:
-        n = n * 26 + (ord(c) - ord('A') + 1)
-    return n
+# Helpers movidos a core/utils.py — re-exportados aquí con prefix `_` por
+# compatibilidad con código existente (tests, llamadas externas).
+from core.utils import (
+    column_letter_to_index as _column_letter_to_index,
+    parse_a1_column_range as _parse_a1_column_range,
+)
 
 
 def doctor():
@@ -1087,177 +1076,17 @@ _TAX_LOT_PREFERENCE = {
 GIFT_COST_OVERRIDES: dict = CONFIG.get("gift_cost_overrides") or {}
 
 
-def _parse_de_number(s):
-    """Parsea números estilo alemán: '1.234,56 €' -> 1234.56, '1,035444' -> 1.035444."""
-    if s is None:
-        return None
-    s = str(s).replace("\xa0", "").replace("€", "").strip()
-    if not s:
-        return None
-    if "." in s and "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+# Movido a core/utils.py
+from core.utils import parse_de_number as _parse_de_number
 
 
-def _extract_trade_details(raw):
-    """Extrae {isin, shares, unit_price} del bloque details.sections de un evento TR.
-
-    Soporta dos formatos:
-      A) TRADING_TRADE_EXECUTED / SAVINGSPLAN / SAVEBACK: fila "Transaktion" dentro de
-         la tabla "Übersicht", con shares en `displayValue.prefix` ('1,035444 × ').
-      B) TRADE_INVOICE (compras/ventas antiguas): sección propia title="Transaktion"
-         con filas 'Anteile' / 'Aktien' y 'Aktienkurs'.
-    """
-    details = raw.get("details") or {}
-    sections = details.get("sections") or []
-
-    isin = None
-    for s in sections:
-        if s.get("type") == "header":
-            action = s.get("action") or {}
-            if action.get("type") == "instrumentDetail":
-                isin = action.get("payload")
-            break
-
-    shares = unit_price = None
-
-    # Formato A
-    for s in sections:
-        if s.get("type") != "table":
-            continue
-        rows = s.get("data") or []
-        if not isinstance(rows, list):
-            continue
-        for r in rows:
-            if not isinstance(r, dict) or r.get("title") != "Transaktion":
-                continue
-            detail = r.get("detail")
-            if not isinstance(detail, dict):
-                continue
-            dv = detail.get("displayValue") or {}
-            if isinstance(dv, dict):
-                prefix = (dv.get("prefix") or "").strip()
-                m = re.match(r"^([\d.,]+)\s*×", prefix)
-                if m:
-                    shares = _parse_de_number(m.group(1))
-                unit_price = _parse_de_number(dv.get("text")) or unit_price
-            if unit_price is None:
-                unit_price = _parse_de_number(detail.get("text"))
-            break
-        if shares is not None:
-            break
-
-    # Formato B
-    if shares is None:
-        for s in sections:
-            if s.get("type") != "table" or s.get("title") != "Transaktion":
-                continue
-            rows = s.get("data") or []
-            if not isinstance(rows, list):
-                continue
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                title = r.get("title")
-                detail = r.get("detail")
-                text = detail.get("text") if isinstance(detail, dict) else None
-                if title in ("Anteile", "Aktien", "Stücke", "Nominale"):
-                    shares = _parse_de_number(text)
-                elif title == "Aktienkurs":
-                    unit_price = _parse_de_number(text)
-            break
-
-    return {"isin": isin, "shares": shares, "unit_price": unit_price}
-
-
-_ISIN_RE = re.compile(r"logos/([A-Z]{2}[A-Z0-9]{9}\d)/v")
-
-
-def _extract_isin_from_icon(raw):
-    """Busca el ISIN en icon / avatar.asset / details.sections[0].data.icon.
-
-    Para regalos (GIFTING_RECIPIENT_ACTIVITY) el root `icon` es 'timeline_gift'
-    genérico; el ISIN real está dentro de `details.sections[0].data.icon`.
-    """
-    candidates = [raw.get("icon"), (raw.get("avatar") or {}).get("asset")]
-    sections = ((raw.get("details") or {}).get("sections") or [])
-    if sections:
-        header = sections[0]
-        if header.get("type") == "header":
-            hd = header.get("data") or {}
-            icon = hd.get("icon")
-            if isinstance(icon, str):
-                candidates.append(icon)
-            elif isinstance(icon, dict):
-                candidates.append(icon.get("asset"))
-    for field in candidates:
-        if not field:
-            continue
-        m = _ISIN_RE.search(field)
-        if m:
-            return m.group(1)
-    return None
-
-
-def _extract_gift_details(raw):
-    """Extrae {isin, shares, cost_eur} de GIFTING_RECIPIENT_ACTIVITY / LOTTERY_PRIZE.
-
-    El coste fiscal (valor al recibir) está en Transaktion→Summe. Si no está,
-    cae a shares × Aktienkurs del bloque Übersicht.
-    """
-    details = raw.get("details") or {}
-    sections = details.get("sections") or []
-
-    isin = _extract_isin_from_icon(raw)
-    # El header de algunos gift events tampoco trae instrumentDetail, pero por si acaso:
-    if not isin:
-        for s in sections:
-            if s.get("type") == "header":
-                action = s.get("action") or {}
-                if action.get("type") == "instrumentDetail":
-                    isin = action.get("payload")
-                break
-
-    shares = unit_price = total_cost = None
-
-    for s in sections:
-        if s.get("type") != "table":
-            continue
-        title = s.get("title")
-        rows = s.get("data") or []
-        if not isinstance(rows, list):
-            continue
-        if title == "Übersicht":
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                rt = r.get("title")
-                detail = r.get("detail")
-                text = detail.get("text") if isinstance(detail, dict) else None
-                if rt == "Aktien":
-                    shares = _parse_de_number(text)
-                elif rt == "Aktienkurs":
-                    unit_price = _parse_de_number(text)
-        elif title == "Transaktion":
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                if r.get("title") in ("Summe", "Gesamt"):
-                    detail = r.get("detail")
-                    text = detail.get("text") if isinstance(detail, dict) else None
-                    parsed = _parse_de_number(text)
-                    if parsed is not None:
-                        total_cost = parsed
-
-    if total_cost is None and shares is not None and unit_price is not None:
-        total_cost = shares * unit_price
-
-    return {"isin": isin, "shares": shares, "cost_eur": total_cost}
+# Parsers de eventos TR movidos a brokers/tr/parser.py — re-exportados aquí
+# con prefix `_` para mantener compatibilidad con tests y código existente.
+from brokers.tr.parser import (
+    extract_isin_from_icon as _extract_isin_from_icon,
+    extract_trade_details as _extract_trade_details,
+    extract_gift_details as _extract_gift_details,
+)
 
 
 def _build_lots_and_sales(events, target_year):
@@ -1353,48 +1182,8 @@ def _build_lots_and_sales(events, target_year):
     return buy_lots, sales, skipped
 
 
-def _apply_fifo(buy_lots, sales):
-    """FIFO por ISIN. Consume las compras más antiguas hasta cubrir cada venta."""
-    lots_by_isin = defaultdict(list)
-    for l in buy_lots:
-        lots_by_isin[l["isin"]].append({
-            "timestamp": l["timestamp"],
-            "shares_remaining": l["shares"],
-            "unit_cost": l["cost_eur"] / l["shares"] if l["shares"] > 0 else 0.0,
-        })
-
-    results = []
-    for sale in sales:
-        lots = lots_by_isin.get(sale["isin"], [])
-        remaining = sale["shares"]
-        matched = []
-        cost_basis = 0.0
-        for lot in lots:
-            if remaining <= 1e-12:
-                break
-            if lot["shares_remaining"] <= 1e-12:
-                continue
-            take = min(lot["shares_remaining"], remaining)
-            cost_part = take * lot["unit_cost"]
-            matched.append({
-                "buy_ts": lot["timestamp"],
-                "shares": take,
-                "unit_cost": lot["unit_cost"],
-                "cost_part": cost_part,
-            })
-            lot["shares_remaining"] -= take
-            remaining -= take
-            cost_basis += cost_part
-
-        results.append({
-            "sale": sale,
-            "shares_matched": sale["shares"] - remaining,
-            "shares_unmatched": remaining,
-            "cost_basis": cost_basis,
-            "gain_loss": sale["proceeds_eur"] - cost_basis,
-            "matched_lots": matched,
-        })
-    return results
+# FIFO movido a core/fifo.py — re-exportado para compatibilidad
+from core.fifo import apply_fifo as _apply_fifo
 
 
 # ── Rendimientos del capital mobiliario (dividendos, intereses, bonos) ────
@@ -1413,55 +1202,8 @@ BOND_SUBTITLES = BOND_CASH_SUBTITLES | BOND_MATURITY_SUBTITLES
 CRYPTO_ISINS = set(CONFIG.get("crypto_isins", []))
 
 
-def _extract_dividend_details(raw):
-    """Extrae {isin, gross, tax, net, subtitle} de un SSP_CORPORATE_ACTION_CASH.
-
-    La tabla 'Geschäft' tiene filas 'Bruttoertrag', 'Steuer' (retención) y 'Gesamt' (neto).
-    """
-    isin = _extract_isin_from_icon(raw)
-    if not isin:
-        sections = ((raw.get("details") or {}).get("sections") or [])
-        for s in sections:
-            if s.get("type") == "header":
-                action = s.get("action") or {}
-                if action.get("type") == "instrumentDetail":
-                    isin = action.get("payload")
-                break
-
-    gross = tax = net = None
-    sections = ((raw.get("details") or {}).get("sections") or [])
-    for s in sections:
-        if s.get("type") != "table" or s.get("title") != "Geschäft":
-            continue
-        for r in s.get("data") or []:
-            if not isinstance(r, dict):
-                continue
-            title = r.get("title")
-            detail = r.get("detail")
-            text = detail.get("text") if isinstance(detail, dict) else None
-            if title == "Bruttoertrag":
-                gross = _parse_de_number(text)
-            elif title == "Steuer":
-                tax = _parse_de_number(text)
-            elif title == "Gesamt":
-                net = _parse_de_number(text)
-        break
-
-    # Fallback: si no encontramos Gesamt en Geschäft, usar amount.value
-    if net is None:
-        net = (raw.get("amount") or {}).get("value")
-    if gross is None and net is not None and tax is not None:
-        gross = net + tax
-    if gross is None and net is not None:
-        gross = net  # sin retención parseable
-
-    return {
-        "isin": isin,
-        "gross": gross,
-        "tax": tax or 0.0,
-        "net": net,
-        "subtitle": (raw.get("subtitle") or "").strip(),
-    }
+# Movido a brokers/tr/parser.py
+from brokers.tr.parser import extract_dividend_details as _extract_dividend_details
 
 
 def _collect_dividends(events, year):

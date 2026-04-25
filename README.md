@@ -261,15 +261,25 @@ The repo ships `.github/workflows/sync.yml`, which can sync daily without your i
 ## Repo layout
 
 ```
-tr_sync.py             — main script (sync + portfolio + renta)
-inspect_events.py      — raw event inspection utility
+tr_sync.py             — Trade Republic entry point (sync + portfolio + renta)
+inspect_events.py      — raw event inspection utility (TR-specific)
+config_cli.py          — interactive CLI for managing config.yaml
 test_tr_sync.py        — unit tests (no network, deterministic)
+
+core/                  — broker-agnostic code
+  utils.py             — number / A1 range helpers
+  fifo.py              — generic FIFO engine
+
+brokers/tr/            — Trade Republic-specific code
+  parser.py            — TR event parsers
+
 config.example.yaml    — config template (committed)
 config.yaml            — YOUR personal config (gitignored)
 Makefile               — make targets
 Makefile.local         — environment-local variables (gitignored, optional)
 README.md              — this file (English)
 README.es.md           — Spanish version
+ARCHITECTURE.md        — multi-broker architecture (bilingual)
 CONFIG.md              — reference of every config.yaml field (Spanish)
 SHEET_TEMPLATE.md      — expected Google Sheet structure (Spanish)
 RENTA.md               — detailed IRPF report guide (Spanish)

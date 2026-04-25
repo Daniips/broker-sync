@@ -4,6 +4,13 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y [
 
 ## [Unreleased]
 
+### Changed
+
+- Repo renamed from `tr-sync` to `broker-sync` to reflect future multi-broker support. URL: https://github.com/Daniips/broker-sync
+- Refactored to a modular layout: `core/` for broker-agnostic utilities (number parsers, A1 helpers, FIFO engine) and `brokers/tr/` for Trade Republic-specific parsers. `tr_sync.py` re-exports the moved helpers under their original names with `_` prefix to preserve compatibility with tests and external callers.
+- Code comments and docstrings in `core/` and `brokers/tr/` are now bilingual (English + Spanish).
+- New `ARCHITECTURE.md` (bilingual) explaining the structure and how to add a new broker.
+
 ### Added
 
 - Toggles `features.{expenses,income,investments,portfolio}` en `config.yaml` para deshabilitar partes del sync.
