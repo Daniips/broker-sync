@@ -32,7 +32,10 @@ Syncs **Trade Republic** events (card transactions, incoming/outgoing transfers,
 
 - **Monthly sync** of expenses / income / investments to your Google Sheet, organising last-month events into tabs like "Gastos", "Ingresos" and "Dinero invertido <year>". Detects the summary block at the bottom of each month and **inserts new rows just above it** without overwriting.
 - **Portfolio snapshot** that writes the current value of each asset to a configurable range of the "Calculo ganancias" tab.
+- **Investment insights** (`make insights`): patrimonio, two reads of unrealized return (your money vs broker-cost-basis-with-saveback), all-time / YTD / 12-month MWR (XIRR) annualized, monthly contributions vs 12-month average, concentration alert per position. Console output, no Sheet writes.
+- **Historical snapshot backfill** (`make backfill-snapshots`): reconstructs past portfolio states using TR's price-history API to enable proper YTD/12m MWR from day one (instead of waiting weeks for snapshots to accumulate).
 - **Full IRPF tax report** for last year (or any year you specify): automatic FIFO for capital gains/losses, dividends with retentions per country (double-taxation deduction), interest, net yield from foreign bonds, crypto snapshot (informative for Spain's Modelo 721) and total TR balance (orientative Modelo 720). Written to a `Renta YYYY` tab.
+- **Feature toggles + capability map** (`make features`): each product feature declares the broker capabilities it needs; if you switch to a broker that lacks them (e.g. saveback only exists in TR), the feature auto-disables instead of crashing.
 - **Configurable filters** to ignore events you already manage manually (e.g. salary received in another bank account and then transferred to TR — to avoid duplication).
 - **Automatic dedup** of already-synced events (via a hidden `_sync_state` tab).
 - **`--dry-run`** mode to verify before writing.
@@ -130,9 +133,14 @@ If TR cookie expires, run `make login` again.
 | `make sync` | Syncs last-month expenses/income/investments |
 | `make portfolio` | Portfolio snapshot (current value per asset) |
 | `make verify` | Local portfolio dry-run |
+| `make insights` | Patrimonio + rentabilidad (MWR all-time/YTD/12m) + concentración + aportaciones (no Sheet writes) |
+| `make insights --verbose` | Same + per-position breakdown for diagnosis |
+| `make features` | Table: every product feature, config toggle, broker support |
 | `make renta` | IRPF report for last year |
 | `make renta YEAR=N` | IRPF report for a specific year |
+| `make backfill-snapshots` | Reconstruct past snapshots (1 year weekly default) for YTD/12m MWR. Optional `START=YYYY-MM-DD` and `FREQ=weekly\|biweekly\|monthly`. |
 | `make inspect` | Inspect raw TR events (debug) |
+| `python tr_sync.py --debug-isin ISIN` | Dump every parsed transaction for one ISIN — reconcile against an external Excel/spreadsheet |
 | `make test` | Unit tests (no network, deterministic) |
 
 ### GitHub Actions (optional)
@@ -261,17 +269,33 @@ The repo ships `.github/workflows/sync.yml`, which can sync daily without your i
 ## Repo layout
 
 ```
-tr_sync.py             — Trade Republic entry point (sync + portfolio + renta)
+tr_sync.py             — Trade Republic entry point (sync + portfolio + insights + renta)
 inspect_events.py      — raw event inspection utility (TR-specific)
 config_cli.py          — interactive CLI for managing config.yaml
-test_tr_sync.py        — unit tests (no network, deterministic)
 
-core/                  — broker-agnostic code
+core/                  — pure logic, no I/O / lógica pura, sin I/O
+  types.py             — Transaction, Position, PortfolioSnapshot, TxKind
+  metrics.py           — MWR/XIRR, plusvalía, concentración, aportaciones
+  fifo.py              — generic FIFO matcher
+  backfill.py          — historical state reconstruction
+  snapshot_store.py    — SnapshotStore protocol + schema
+  features.py          — feature registry + capability check
   utils.py             — number / A1 range helpers
-  fifo.py              — generic FIFO engine
 
-brokers/tr/            — Trade Republic-specific code
-  parser.py            — TR event parsers
+brokers/               — data sources
+  tr/__init__.py       — TR CAPABILITIES set
+  tr/adapter.py        — TR raw events ↔ core.types
+  tr/parser.py         — TR event field extractors
+
+storage/                — persistence backends (sinks)
+  sheets/client.py      — open_spreadsheet
+  sheets/status_store.py    — visible "Estado sync" tab
+  sheets/sync_state_store.py — hidden dedup tab
+  sheets/snapshot_store.py   — hidden snapshot tabs (agg + per-position)
+
+test_metrics.py        — unit tests for core.metrics (synthetic data)
+test_backfill.py       — unit tests for core.backfill
+test_tr_sync.py        — unit tests for sync logic
 
 config.example.yaml    — config template (committed)
 config.yaml            — YOUR personal config (gitignored)
@@ -279,7 +303,7 @@ Makefile               — make targets
 Makefile.local         — environment-local variables (gitignored, optional)
 README.md              — this file (English)
 README.es.md           — Spanish version
-ARCHITECTURE.md        — multi-broker architecture (bilingual)
+ARCHITECTURE.md        — three-layer architecture, adding brokers/storage (bilingual)
 CONFIG.md              — reference of every config.yaml field (Spanish)
 SHEET_TEMPLATE.md      — expected Google Sheet structure (Spanish)
 RENTA.md               — detailed IRPF report guide (Spanish)

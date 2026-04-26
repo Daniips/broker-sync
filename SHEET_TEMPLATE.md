@@ -117,6 +117,26 @@ status_labels:
 
 Pestaña interna que el script crea automáticamente para deduplicar eventos ya sincronizados. **No la borres ni la edites a mano**. Se oculta automáticamente.
 
+## 6.1 Pestaña `_snapshots` (oculta)
+
+Pestaña que el script crea automáticamente al ejecutar `make insights`, `make portfolio` o `make backfill-snapshots`. Una fila por snapshot:
+
+| ts | cash_eur | positions_value_eur | cost_basis_eur | total_eur |
+|---|---|---|---|---|
+| 2026-04-26T13:50:13.411535+02:00 | 13127,46 | 9423,89 | 8424,2 | 22551,35 |
+
+Se usa para calcular MWR YTD / 12 meses (necesita el valor de las posiciones al inicio del periodo). **No la borres ni la edites a mano.** El nombre se puede cambiar en `config.yaml > sheets.snapshots`.
+
+## 6.2 Pestaña `_snapshots_positions` (oculta)
+
+Mismo patrón pero con desglose por posición. Una fila por (snapshot, ISIN):
+
+| ts | isin | title | shares | net_value_eur | cost_basis_eur |
+|---|---|---|---|---|---|
+| 2026-04-26T13:50:13… | IE00B5BMR087 | Core S&P 500 USD | 6.97 | 4205,81 | 3577,44 |
+
+Útil para gráficas de evolución por activo a lo largo del tiempo. El nombre se puede cambiar en `config.yaml > sheets.snapshots_positions`.
+
 ## 7. Pestaña `Renta YYYY` (la crea `make renta`)
 
 Cuando ejecutas `make renta`, el script crea/sobrescribe esta pestaña con el informe IRPF completo (FIFO + dividendos + intereses + bonos + posición Modelo 720). No hay que crearla a mano.
@@ -133,6 +153,8 @@ Cuando ejecutas `make renta`, el script crea/sobrescribe esta pestaña con el in
 | `Calculo ganancias` | Sí | Sobrescribe rango configurado |
 | `Estado sync` | No (auto) | Lee/escribe |
 | `_sync_state` | No (auto, oculta) | Lee/escribe |
+| `_snapshots` | No (auto, oculta) | Lee/append (insights, portfolio, backfill) |
+| `_snapshots_positions` | No (auto, oculta) | Append (insights, portfolio, backfill) |
 | `Renta YYYY` | No (auto, lo crea `make renta`) | Sobrescribe entera |
 
 Si tu Sheet tiene otra estructura, **edita los nombres de pestañas y markers en `config.yaml`** o adapta el código.

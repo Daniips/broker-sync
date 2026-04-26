@@ -4,12 +4,51 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y [
 
 ## [Unreleased]
 
+### Added — Investment insights & analytics
+
+- **`make insights`** (`tr_sync.py --insights`): consola con patrimonio, rentabilidad y aportaciones. No toca la Sheet (excepto los `_snapshots` ocultos). Bloques:
+  - Patrimonio actual: ETFs/acciones, cripto, cash, total (separados como en TR app).
+  - Rentabilidad: cost basis sin/con saveback, plusvalía sobre dinero propio (matchea Excel y TR app), plusvalía sobre cost basis bruto.
+  - Rentabilidad histórica: aportado neto + MWR (XIRR) all-time, YTD y 12 meses anualizado, en dos modos (saveback como income vs como aportación).
+  - Aportaciones mensuales: este mes vs media de los últimos 12m, con `Δ vs media`.
+  - Concentración: distribución por posición con bar chart + alerta `⚠ alta` si una posición supera el threshold (configurable, default 35%).
+- **`make backfill-snapshots`** (`tr_sync.py --backfill-snapshots`): reconstruye snapshots históricos vía `aggregateHistoryLight` de TR. Soporta `--start YYYY-MM-DD` y `--frequency weekly|biweekly|monthly`. Desbloquea MWR YTD/12m sin esperar a acumular semanas.
+- **`make features`** (`tr_sync.py --features`): tabla con todas las features del producto, su estado en config y el soporte del broker activo.
+- **`tr_sync.py --debug-isin ISIN`**: lista todas las transacciones que el adapter saca para un ISIN concreto. Útil para reconciliar contra fuentes externas (Excel manual).
+
+### Added — Architecture
+
+- **`core/types.py`**: modelo agnóstico de broker (Transaction, Position, PortfolioSnapshot, TxKind). Frozen dataclasses con convención de signos documentada y campos para `is_bonus`, `from_cash`, `cost_basis_eur`, `exchange_id`.
+- **`core/metrics.py`**: funciones puras sobre el modelo agnóstico — `xirr`, `mwr`, `simple_return`, `unrealized_return`, `unrealized_return_user_paid`, `cost_basis_user_paid_per_isin`, `concentration`, `monthly_contributions`, `contribution_vs_average`.
+- **`core/backfill.py`**: reconstrucción histórica pura — `shares_at`, `cash_at`, `reconstruct_snapshot_at`. No I/O.
+- **`core/snapshot_store.py`**: protocolo `SnapshotStore` + esquema y conversión pura `snapshot_to_rows` + helper `snapshot_value_at`.
+- **`core/features.py`**: registro `FEATURE_REGISTRY` con cada feature y sus capabilities requeridas. Funciones `is_feature_enabled`, `is_feature_supported`, `feature_status`.
+- **`brokers/tr/__init__.py`**: declara `CAPABILITIES` (set de strings) que TR soporta. Otros brokers exportarán su set propio.
+- **`brokers/tr/adapter.py`**: `fetch_transactions`, `fetch_snapshot`, `fetch_price_history`, `fetch_price_history_with_fallback` (prueba múltiples exchanges para ISINs cripto), `raw_event_to_tx`. Mapea event types de TR a `TxKind`. Marca saveback (`is_bonus=True`, `from_cash=False`) y regalos (`is_bonus=False`, `from_cash=False`).
+- **`storage/sheets/`**: implementaciones backend-específicas para Google Sheets — `client.py` (open_spreadsheet), `status_store.py` (StatusStore), `sync_state_store.py` (SyncStateStore dedup), `snapshot_store.py` (SheetsSnapshotStore agregado + por posición).
+- **Pestañas ocultas nuevas** en la Sheet:
+  - `_snapshots`: una fila por snapshot con `ts | cash_eur | positions_value_eur | cost_basis_eur | total_eur`. Append automático en cada `make insights / portfolio` y en backfill.
+  - `_snapshots_positions`: una fila por (snapshot, posición) con `ts | isin | title | shares | net_value_eur | cost_basis_eur` para evolución por activo.
+
+### Added — Config
+
+- **`features.{insights, concentration, snapshot_persist, backfill_snapshots, saveback_metrics, ...}`**: toggles individuales por feature. La feature se desactiva tanto si el config la apaga como si el broker no la soporta.
+- **`concentration_threshold`** (default 0.35): % a partir del cual una posición se marca como "alta concentración" en el bloque correspondiente.
+- **`sheets.snapshots`** (default `"_snapshots"`) y **`sheets.snapshots_positions`** (default `"_snapshots_positions"`): nombres de las pestañas ocultas para histórico.
+
 ### Changed
 
-- Repo renamed from `tr-sync` to `broker-sync` to reflect future multi-broker support. URL: https://github.com/Daniips/broker-sync
-- Refactored to a modular layout: `core/` for broker-agnostic utilities (number parsers, A1 helpers, FIFO engine) and `brokers/tr/` for Trade Republic-specific parsers. `tr_sync.py` re-exports the moved helpers under their original names with `_` prefix to preserve compatibility with tests and external callers.
-- Code comments and docstrings in `core/` and `brokers/tr/` are now bilingual (English + Spanish).
-- New `ARCHITECTURE.md` (bilingual) explaining the structure and how to add a new broker.
+- Repo renamed from `tr-sync` to `broker-sync` to reflect future multi-broker support. URL: https://github.com/Daniips/broker-sync.
+- Refactored to a modular layout: `core/` (puro), `brokers/<x>/` (data sources), `storage/<backend>/` (sinks). `tr_sync.py` baja a ~2270 líneas (pre-refactor: ~2400).
+- Code comments and docstrings in `core/`, `brokers/`, `storage/` are bilingual (English + Spanish).
+- `ARCHITECTURE.md` reescrito reflejando la estructura actual y el patrón core/brokers/storage.
+
+### Added — Performance & docs (post-refactor)
+
+- **`core/cache.py`** + flag `--refresh`: cache pickle de `(snapshot, txs)` con TTL=5min. Encadena `make insights` / `make portfolio` / `make backfill-snapshots` sin re-fetch innecesario. Login a TR se evita totalmente cuando hay cache fresco.
+- **`INSIGHTS.md`**: doc en español explicando bloque a bloque el output de `make insights`, las 2 lecturas de cost basis, los 3 horizontes de MWR, el toggle income/deposit, y FAQ sobre las preguntas comunes.
+- **`IMPROVEMENTS.md`**: roadmap priorizado de mejoras pendientes (renta extraction, per-asset limits, crypto backfill, telemetría, alertas, etc.).
+- **`test_adapter.py`**: 24 tests del adapter TR cubriendo cada `eventType` (BUY/SELL/SAVEBACK/GIFT/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/CANCELED/missing-data) con parser mockeado. Suite total pasa de 116 a 140 tests.
 
 ### Added
 

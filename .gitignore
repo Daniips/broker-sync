@@ -11,3 +11,4 @@ config.yaml
 
 # Makefile.local: variables específicas del entorno del usuario (REPO de GitHub, etc.).
 Makefile.local
+.broker_cache.pickle

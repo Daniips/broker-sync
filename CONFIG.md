@@ -33,6 +33,10 @@ Toda la configuración por usuario vive en `config.yaml`. Este fichero **no se c
 | `init_sheet_headers` | dict | opcional | Cabeceras que escribe `make init-sheet` |
 | `subtitle_translations` | dict | opcional | Traducciones alemán → idioma del usuario (se mergean con default castellano) |
 | `renta_classification` | dict | opcional | Subtitles para clasificar dividendos/bonos en `make renta` |
+| `features` | dict | opcional | Toggles individuales por feature (`insights`, `concentration`, `backfill_snapshots`, etc.) — ver sección Features |
+| `concentration_threshold` | float | opcional | % a partir del cual una posición se marca "alta concentración" en `make insights` (default `0.35`) |
+| `sheets.snapshots` | string | opcional | Nombre de la pestaña oculta de snapshots agregados (default `_snapshots`) |
+| `sheets.snapshots_positions` | string | opcional | Nombre de la pestaña oculta de snapshots por posición (default `_snapshots_positions`) |
 
 ---
 
@@ -74,6 +78,8 @@ sheets:
 | `portfolio` | Pestaña con el snapshot de valor por activo. |
 | `status` | El script crea esta pestaña si no existe; muestra timestamps del último sync correcto. |
 | `sync_state` | Pestaña oculta donde el script guarda los IDs de eventos ya escritos para deduplicar. **No la edites a mano.** |
+| `snapshots` | Pestaña oculta con un snapshot por ejecución de `make insights`/`portfolio`/`backfill-snapshots`. Default `_snapshots`. **No la edites a mano.** |
+| `snapshots_positions` | Pestaña oculta con desglose por posición de cada snapshot. Default `_snapshots_positions`. **No la edites a mano.** |
 
 ---
 
@@ -258,6 +264,50 @@ subtitle_translations:
 ```
 
 Si TR introduce un nuevo subtitle que no está en el default, añádelo aquí.
+
+---
+
+## `features` (opcional)
+
+Toggles por feature. Por defecto **todas las features están activadas**; añade entradas aquí solo si quieres apagar alguna.
+
+```yaml
+features:
+  expenses: true              # sync de gastos
+  income: true                # sync de ingresos
+  investments: true           # sync de "Dinero invertido YYYY"
+  portfolio: true             # snapshot a "Calculo ganancias"
+  renta: true                 # informe IRPF
+  insights: true              # patrimonio + rentabilidad + concentración
+  concentration: true         # bloque de concentración dentro de insights
+  snapshot_persist: true      # guardar snapshots automáticos en cada ejecución
+  backfill_snapshots: true    # reconstrucción histórica de snapshots
+  saveback_metrics: true      # plusvalía descontando saveback
+```
+
+Una feature solo se ejecuta si **(a)** está activada aquí Y **(b)** el broker activo soporta sus capabilities. Para ver el estado actual: `make features`.
+
+```
+$ make features
+Feature                Config   Soporte   Efectiva   Descripción
+---------------------- -------- --------- ---------- ----------------------------------------
+insights               ✓        ✓         ✓ ON       Patrimonio, rentabilidad TR-style + propio, MWR…
+concentration          ✓        ✓         ✓ ON       Distribución de cartera por posición + alerta…
+saveback_metrics       ✓        ✓         ✓ ON       Plusvalía descontando saveback (cuando el broker tiene saveback)
+…
+```
+
+Cuando llegue un segundo broker que no tenga (p.ej.) saveback, `saveback_metrics` saldrá `Soporte ✗ → Efectiva ✗ off` automáticamente.
+
+---
+
+## `concentration_threshold` (opcional)
+
+Float entre 0 y 1. Define el % a partir del cual una posición se marca como "alta concentración" en `make insights`. Default `0.35` (35%).
+
+```yaml
+concentration_threshold: 0.40   # 40%
+```
 
 ---
 
