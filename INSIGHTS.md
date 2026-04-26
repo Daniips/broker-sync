@@ -165,20 +165,79 @@ Si no hay histórico suficiente para comparar (cuenta nueva), muestra los últim
 
 ## Bloque 5 — CONCENTRACIÓN
 
-```
-CONCENTRACIÓN (% sobre posiciones, alerta a >35%)
-  Core S&P 500 USD (Acc)        44.63%  ████████████████████████████  ⚠ alta
-  Core MSCI EM IMI USD (Acc)    15.88%  ██████████
-  ...
-  ⚠ Top-1 (Core S&P 500 USD (Acc)) representa 44.6% de la cartera.
-    Considera diversificar si quieres reducir riesgo de concentración.
-```
-
 Distribución del valor de tus posiciones (excluye cash) por activo, ordenada de más a menos peso. Las barras son visuales — mismo ratio que el % numérico.
 
-- **Threshold por defecto**: 35%. Configurable en `config.yaml > concentration_threshold`.
-- **Alerta `⚠ alta`** aparece cuando una posición supera el threshold.
-- **Aviso de Top-1** aparece debajo si la posición principal supera el threshold.
+### Modo simple (sin límites por activo)
+
+Si no defines `concentration_limits` en config, todos los activos se comparan contra el `concentration_threshold` global (default 35%):
+
+```
+CONCENTRACIÓN (% sobre posiciones, alerta a >35%)
+  Core S&P 500 USD (Acc)        44.63%  ███████████  límite  35% (global), margen  −9.6 pp
+  Core MSCI EM IMI USD (Acc)    15.88%  ████         límite  35% (global), margen +19.1 pp
+  ...
+  ⚠ 1 posición(es) por encima de su límite individual.
+```
+
+### Modo per-asset (con límites individuales)
+
+Si defines `concentration_limits` en `config.yaml`, cada ISIN se evalúa contra su propio máximo. Útil cuando tienes tolerancias razonables distintas por activo (core ETFs altas, cripto bajas):
+
+```yaml
+concentration_limits:
+  IE00B5BMR087: 0.50    # SP500 — core, tolerancia alta
+  XF000SOL0012: 0.08    # Solana — cripto, tolerancia baja
+```
+
+Output:
+
+```
+CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
+  Core S&P 500 USD (Acc)        44.63%  ███████████  límite  50%, margen  +5.4 pp
+  S&P 500 Information Tech USD  14.50%  ████         límite  20%, margen  +5.5 pp
+  Solana                         2.95%  █            límite   8%, margen  +5.1 pp
+  MSCI India USD (Acc)           2.67%  █            límite  35% (global), margen +32.3 pp
+  ...
+  ✓ Todas las posiciones dentro de su límite.
+```
+
+### Modo "solo me importan X activos"
+
+Caso típico: solo quieres alerta para Solana (o cualquier cripto), los demás te dan igual. Pon `concentration_threshold: null` y solo los ISINs con entrada en `concentration_limits` llevarán línea de alerta:
+
+```yaml
+concentration_threshold: null
+concentration_limits:
+  XF000SOL0012: 0.08
+```
+
+Output:
+
+```
+CONCENTRACIÓN (% sobre posiciones, alerta solo en activos con límite explícito)
+  Core S&P 500 USD (Acc)        44.63%  ██████████████████
+  Core MSCI EM IMI USD (Acc)    15.88%  ██████
+  S&P 500 Information Tech USD  14.50%  ██████
+  MSCI World Small Cap USD (Ac  10.91%  ████
+  Core MSCI Europe EUR (Acc)     8.46%  ███
+  Solana                         2.95%  █                   límite   8%, margen  +5.1 pp
+  MSCI India USD (Acc)           2.67%  █
+
+  ✓ Todas las posiciones dentro de su límite.
+```
+
+Solo Solana muestra línea de límite. Los demás van "limpios" sin alertas posibles.
+
+### Cuándo se muestra "(global)"
+
+Indica que ese activo **no tiene entrada** en `concentration_limits` y se está comparando contra el `concentration_threshold` global. Útil para detectar si te has olvidado de añadir un límite a alguna posición.
+
+### Significado de las alertas
+
+- **EXCEDIDO en X pp**: la posición está por encima de su límite. Margen negativo en el ratio.
+- **margen +X pp**: la posición está por debajo del límite con X puntos porcentuales de holgura.
+- **✓ Todas dentro de su límite** (al final): nada que rebalancear.
+- **⚠ N posiciones por encima**: cuántas activos te has pasado.
 
 No es una recomendación de cambiar nada — es una señal de que **mires** si esa concentración te resulta cómoda. Una cartera 100% S&P 500 está perfectamente concentrada y muchos lo prefieren así.
 

@@ -208,13 +208,29 @@ def concentration(
     snapshot: PortfolioSnapshot,
     *,
     scope: Literal["positions", "total"] = "positions",
+    limits: Optional[dict[str, float]] = None,
+    default_threshold: Optional[float] = None,
 ) -> list[dict]:
     """Distribución de valor entre posiciones, ordenada de más a menos peso.
 
     `scope="positions"`: % sobre el valor de las posiciones (excluye cash).
     `scope="total"`: % sobre el patrimonio total (cash + posiciones).
 
-    Devuelve [{isin, title, value, pct}, ...] sorted desc por pct.
+    `limits`: dict ISIN → límite (0-1) por posición. Una entrada permite definir
+        un máximo razonable distinto para cada activo (p.ej. SP500 50%, cripto
+        8%). ISINs sin entrada caen al `default_threshold`.
+    `default_threshold`: límite a aplicar a ISINs no presentes en `limits`.
+        Si es None, las posiciones sin límite explícito devuelven `limit=None`
+        y `exceeded=False` (no se aplica ninguna alerta).
+
+    Devuelve `[{isin, title, value, pct, limit, margin_pp, exceeded}, ...]`
+    sorted desc por pct, donde:
+      - `limit`: límite efectivo (0-1) o None si no hay ninguno aplicable.
+      - `margin_pp`: (limit - pct) × 100 en puntos porcentuales. Positivo = bajo
+        el límite. Negativo = excedido. None si no hay límite.
+      - `exceeded`: True si pct > limit (>= con tolerancia 1e-9 para evitar
+        falsos positivos por aritmética flotante).
+
     Lista vacía si no hay posiciones (o denominador es 0).
     """
     if scope == "total":
@@ -223,15 +239,28 @@ def concentration(
         denom = snapshot.positions_value_eur
     if denom <= 0:
         return []
-    out = [
-        {
+    limits = limits or {}
+    out = []
+    for p in snapshot.positions:
+        pct = p.net_value_eur / denom
+        limit = limits.get(p.isin) if p.isin else None
+        if limit is None:
+            limit = default_threshold
+        if limit is not None:
+            margin_pp = (limit - pct) * 100.0
+            exceeded = pct > limit + 1e-9
+        else:
+            margin_pp = None
+            exceeded = False
+        out.append({
             "isin": p.isin,
             "title": p.title,
             "value": p.net_value_eur,
-            "pct": p.net_value_eur / denom,
-        }
-        for p in snapshot.positions
-    ]
+            "pct": pct,
+            "limit": limit,
+            "margin_pp": margin_pp,
+            "exceeded": exceeded,
+        })
     out.sort(key=lambda x: -x["pct"])
     return out
 

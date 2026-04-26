@@ -34,7 +34,8 @@ Toda la configuración por usuario vive en `config.yaml`. Este fichero **no se c
 | `subtitle_translations` | dict | opcional | Traducciones alemán → idioma del usuario (se mergean con default castellano) |
 | `renta_classification` | dict | opcional | Subtitles para clasificar dividendos/bonos en `make renta` |
 | `features` | dict | opcional | Toggles individuales por feature (`insights`, `concentration`, `backfill_snapshots`, etc.) — ver sección Features |
-| `concentration_threshold` | float | opcional | % a partir del cual una posición se marca "alta concentración" en `make insights` (default `0.35`) |
+| `concentration_threshold` | float | opcional | % global a partir del cual una posición se marca "alta concentración" cuando no tiene límite explícito (default `0.35`) |
+| `concentration_limits` | dict | opcional | Límite individual por ISIN (override del global). `{ISIN: 0.50, ...}` |
 | `sheets.snapshots` | string | opcional | Nombre de la pestaña oculta de snapshots agregados (default `_snapshots`) |
 | `sheets.snapshots_positions` | string | opcional | Nombre de la pestaña oculta de snapshots por posición (default `_snapshots_positions`) |
 
@@ -303,11 +304,44 @@ Cuando llegue un segundo broker que no tenga (p.ej.) saveback, `saveback_metrics
 
 ## `concentration_threshold` (opcional)
 
-Float entre 0 y 1. Define el % a partir del cual una posición se marca como "alta concentración" en `make insights`. Default `0.35` (35%).
+Float entre 0 y 1, o `null`. Define el % global a partir del cual una posición se marca como "alta concentración" en `make insights`. Default `0.35` (35%). Solo aplica a ISINs sin entrada en `concentration_limits`.
 
 ```yaml
 concentration_threshold: 0.40   # 40%
+concentration_threshold: null   # apaga el global; solo alertan ISINs con límite explícito
 ```
+
+`null` es útil cuando solo te importa la concentración de **algunos activos concretos** (típico: cripto) y los demás te dan igual cómo se repartan.
+
+---
+
+## `concentration_limits` (opcional)
+
+Dict `{ISIN: float}` con el límite individual de cada activo en la cartera. Sobrescribe el `concentration_threshold` para los ISINs presentes. Útil cuando piensas la cartera con tolerancias distintas por activo (core ETFs altas, cripto bajas).
+
+```yaml
+concentration_limits:
+  IE00B5BMR087: 0.50    # Core SP500: 50% (es core, tolerancia alta)
+  IE00B3WJKG14: 0.20    # SP500 Tech: 20%
+  IE00BKM4GZ66: 0.20    # EM IMI: 20%
+  IE00BF4RFH31: 0.15    # Small Cap: 15%
+  IE00B4K48X80: 0.15    # MSCI Europe: 15%
+  IE00BZCQB185: 0.10    # MSCI India: 10%
+  XF000SOL0012: 0.08    # Solana: 8% (cripto, tolerancia baja)
+```
+
+Comportamiento en `make insights`:
+
+```
+CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
+  Core S&P 500 USD (Acc)        44.63%  ███████████  límite  50%, margen  +5.4 pp
+  S&P 500 Information Tech USD  14.50%  ████         límite  20%, margen  +5.5 pp
+  Solana                         9.20%  ███          límite   8%, EXCEDIDO en  1.2 pp
+  ...
+  ⚠ 1 posición(es) por encima de su límite individual.
+```
+
+ISINs **sin entrada** caen al `concentration_threshold` global (marcado como "(global)" en el output para que sepas distinguirlo).
 
 ---
 

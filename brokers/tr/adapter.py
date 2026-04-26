@@ -296,6 +296,74 @@ async def fetch_price_history(
     return out
 
 
+async def fetch_instrument_exchanges(
+    tr,
+    isin: str,
+    *,
+    timeout: float = 5.0,
+    debug: bool = False,
+) -> list[str]:
+    """Query `instrument_details(isin)` and parse out the available exchange IDs.
+
+    Returns a list of exchange identifiers (e.g. ["LSX", "BTLX", "BSF"]) that
+    TR considers valid for this ISIN. Empty list on any error or unknown shape.
+
+    Used as last-resort fallback in `fetch_price_history_with_fallback` for
+    instruments where the hardcoded list ("LSX", "BTLX", "BSF") doesn't match
+    — typical for crypto ISINs where the actual exchange is broker-specific
+    and changes between regions.
+    """
+    import asyncio as _asyncio
+    import logging
+
+    log = logging.getLogger("tr_sync")
+    sub_id = None
+    try:
+        sub_id = await tr.instrument_details(isin)
+        result = await _asyncio.wait_for(tr._recv_subscription(sub_id), timeout=timeout)
+    except Exception as e:
+        log.debug(f"instrument_details({isin}) failed: {type(e).__name__}: {e}")
+        return []
+    finally:
+        if sub_id is not None:
+            try:
+                await tr.unsubscribe(sub_id)
+            except Exception:
+                pass
+
+    if debug and isinstance(result, dict):
+        log.info(f"   [debug] instrument_details({isin}) keys: {list(result.keys())}")
+
+    if not isinstance(result, dict):
+        log.warning(f"   ⚠  instrument_details({isin}) devolvió {type(result).__name__}, no dict")
+        return []
+
+    # TR returns a structure like {"exchanges": [{"slug": "LSX", ...}, ...]} or
+    # similar. Try the common variants defensively.
+    candidates = (
+        result.get("exchanges")
+        or result.get("exchangeIds")
+        or result.get("availableExchanges")
+        or []
+    )
+    out: list[str] = []
+    for entry in candidates:
+        if isinstance(entry, str):
+            out.append(entry)
+        elif isinstance(entry, dict):
+            ex_id = (
+                entry.get("slug")
+                or entry.get("id")
+                or entry.get("exchangeId")
+                or entry.get("name")
+            )
+            if ex_id and isinstance(ex_id, str):
+                out.append(ex_id)
+    # Always log what we found — only fires when fallback is needed, so noise is bounded.
+    log.info(f"   discovered exchanges for {isin}: {out or '(none)'}")
+    return out
+
+
 async def fetch_price_history_with_fallback(
     tr,
     isin: str,
@@ -307,15 +375,21 @@ async def fetch_price_history_with_fallback(
 ) -> tuple[list[dict], Optional[str]]:
     """Try several exchanges in order until one returns data.
 
-    Returns (history, exchange_used). If all fail, returns ([], None).
-    Shorter default timeout (5s) than the single-shot version, since we may
-    iterate over several venues.
+    Order:
+      1. The exchanges hint passed by the caller (typically from snapshot's
+         `exchange_id` and a hardcoded list of common venues).
+      2. If all fail, query `instrument_details(isin)` to discover actual
+         exchanges TR knows about, and retry with those.
+
+    Returns (history, exchange_used). If everything fails, returns ([], None).
     """
     import logging
     log = logging.getLogger("tr_sync")
     if not exchanges:
         exchanges = ["LSX"]
+    tried = set()
     for exch in exchanges:
+        tried.add(exch)
         history = await fetch_price_history(
             tr, isin,
             range_str=range_str,
@@ -327,6 +401,23 @@ async def fetch_price_history_with_fallback(
             if exch != exchanges[0]:
                 log.info(f"   ✓  {isin} encontrado en exchange '{exch}' (fallback)")
             return history, exch
+
+    # Last resort: ask TR what exchanges it actually has for this ISIN.
+    discovered = await fetch_instrument_exchanges(tr, isin, timeout=timeout, debug=debug)
+    new_exchanges = [e for e in discovered if e not in tried]
+    if new_exchanges:
+        log.info(f"   → {isin}: probando exchanges descubiertos: {new_exchanges}")
+        for exch in new_exchanges:
+            history = await fetch_price_history(
+                tr, isin,
+                range_str=range_str,
+                exchange=exch,
+                timeout=timeout,
+                debug=False,
+            )
+            if history:
+                log.info(f"   ✓  {isin} encontrado en exchange '{exch}' (descubierto via instrument_details)")
+                return history, exch
     return [], None
 
 

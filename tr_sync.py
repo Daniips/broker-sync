@@ -196,8 +196,18 @@ STATUS_LABELS = CONFIG.get("status_labels", {"portfolio": "Portfolio", "sync": "
 DEFAULT_BUFFER_DAYS = int(CONFIG.get("default_buffer_days", 7))
 
 # Threshold (% del valor de posiciones) por encima del cual una posición se
-# marca como "alta concentración" en el bloque de insights.
-CONCENTRATION_THRESHOLD = float(CONFIG.get("concentration_threshold", 0.35))
+# marca como "alta concentración" en el bloque de insights. None = sin
+# threshold global; solo alertan los ISINs con entrada en concentration_limits.
+_threshold_raw = CONFIG.get("concentration_threshold", 0.35)
+CONCENTRATION_THRESHOLD = float(_threshold_raw) if _threshold_raw is not None else None
+
+# Límites individuales por ISIN (override del threshold global). Cada entrada
+# es {ISIN: float} con valor entre 0 y 1. ISINs sin entrada caen al threshold.
+# Permite definir tolerancias razonables por activo (SP500 alto, cripto bajo).
+CONCENTRATION_LIMITS = {
+    str(isin): float(limit)
+    for isin, limit in (CONFIG.get("concentration_limits") or {}).items()
+}
 
 # Tipos de evento de TR (no van a config porque son de la API y no varían por usuario)
 EXPENSE_EVENT_TYPES = {
@@ -1082,11 +1092,14 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
     from core.backfill import reconstruct_snapshot_at
 
     tz = TIMEZONE
-    today = datetime.now(tz=tz)
+    # Normalizamos a mediodía para que re-ejecutar backfill produzca exactamente
+    # los mismos timestamps (y el dedup por ts funcione). Si lo dejáramos como
+    # `datetime.now()`, dos backfills en el mismo día generarían filas duplicadas.
+    today_noon = datetime.now(tz=tz).replace(hour=12, minute=0, second=0, microsecond=0)
     if start_iso:
-        start = datetime.fromisoformat(start_iso).replace(tzinfo=tz)
+        start = datetime.fromisoformat(start_iso).replace(tzinfo=tz, hour=12, minute=0, second=0, microsecond=0)
     else:
-        start = today - timedelta(days=365)
+        start = today_noon - timedelta(days=365)
 
     if frequency == "weekly":
         delta = timedelta(days=7)
@@ -1099,15 +1112,15 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
 
     dates = []
     d = start
-    while d <= today - delta:
+    while d <= today_noon - delta:
         dates.append(d)
         d += delta
     if not dates:
-        log.error(f"No hay fechas a reconstruir entre {start.date()} y {today.date()} con cadencia {frequency}.")
+        log.error(f"No hay fechas a reconstruir entre {start.date()} y {today_noon.date()} con cadencia {frequency}.")
         return
 
     # Determine the longest range we need given start date.
-    days_back = (today - start).days
+    days_back = (today_noon - start).days
     if days_back <= 30: range_str = "1m"
     elif days_back <= 90: range_str = "3m"
     elif days_back <= 365: range_str = "1y"
@@ -1352,23 +1365,53 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
     print()
 
     print(bar)
-    print(f"  CONCENTRACIÓN (% sobre posiciones, alerta a >{CONCENTRATION_THRESHOLD*100:.0f}%)")
+    if CONCENTRATION_LIMITS and CONCENTRATION_THRESHOLD is not None:
+        header = f"  CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global {CONCENTRATION_THRESHOLD*100:.0f}%)"
+    elif CONCENTRATION_LIMITS:
+        header = f"  CONCENTRACIÓN (% sobre posiciones, alerta solo en activos con límite explícito)"
+    elif CONCENTRATION_THRESHOLD is not None:
+        header = f"  CONCENTRACIÓN (% sobre posiciones, alerta a >{CONCENTRATION_THRESHOLD*100:.0f}%)"
+    else:
+        header = f"  CONCENTRACIÓN (% sobre posiciones, sin alertas)"
+    print(header)
     print(bar)
-    conc = concentration(snapshot)
+    conc = concentration(
+        snapshot,
+        limits=CONCENTRATION_LIMITS or None,
+        default_threshold=CONCENTRATION_THRESHOLD,
+    )
     if conc:
-        max_bar = 28
+        max_bar = 18
+        max_pct = max(c["pct"] for c in conc)
+        exceeded_count = 0
+        # "(global)" tag only useful in mixed mode: when some ISINs have explicit
+        # limits and others fall back. In pure-global or pure-explicit, suppress.
+        has_per_asset = bool(CONCENTRATION_LIMITS)
         for entry in conc:
             pct = entry["pct"]
-            bar_len = int(round(pct * max_bar / max(c["pct"] for c in conc)))
+            bar_len = int(round(pct * max_bar / max_pct))
             bar_str = "█" * bar_len
-            flag = "  ⚠ alta" if pct >= CONCENTRATION_THRESHOLD else ""
             title = (entry["title"] or entry["isin"])[:28]
-            print(f"  {title:<28} {pct*100:>6.2f}%  {bar_str}{flag}")
-        top = conc[0]
-        if top["pct"] >= CONCENTRATION_THRESHOLD:
-            print()
-            print(f"  ⚠ Top-1 ({top['title']}) representa {top['pct']*100:.1f}% de la cartera.")
-            print(f"    Considera diversificar si quieres reducir riesgo de concentración.")
+            limit = entry["limit"]
+            margin = entry["margin_pp"]
+            if limit is None:
+                trail = ""
+            else:
+                has_explicit = has_per_asset and entry["isin"] in CONCENTRATION_LIMITS
+                source = " (global)" if (has_per_asset and not has_explicit) else ""
+                if entry["exceeded"]:
+                    trail = f"  límite {limit*100:>4.0f}%{source}, EXCEDIDO en {abs(margin):>4.1f} pp"
+                    exceeded_count += 1
+                else:
+                    trail = f"  límite {limit*100:>4.0f}%{source}, margen {margin:>+5.1f} pp"
+            print(f"  {title:<28} {pct*100:>6.2f}%  {bar_str:<{max_bar}}{trail}")
+        print()
+        if exceeded_count == 0:
+            if any(e["limit"] is not None for e in conc):
+                print(f"  ✓ Todas las posiciones dentro de su límite.")
+        else:
+            print(f"  ⚠ {exceeded_count} posición(es) por encima de su límite individual.")
+            print(f"    Considera rebalancear si quieres ajustarlas.")
     print()
 
     if verbose:

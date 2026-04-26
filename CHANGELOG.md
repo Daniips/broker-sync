@@ -43,6 +43,13 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y [
 - Code comments and docstrings in `core/`, `brokers/`, `storage/` are bilingual (English + Spanish).
 - `ARCHITECTURE.md` reescrito reflejando la estructura actual y el patrón core/brokers/storage.
 
+### Added — Per-asset concentration limits
+
+- **`concentration_limits`** (config nuevo): dict `{ISIN: float}` para definir un máximo individual por activo. Sobrescribe el `concentration_threshold` global. Útil para tener tolerancias distintas por tipo de activo (core ETFs alto, cripto bajo).
+- **`core.metrics.concentration()`** acepta ahora `limits` y `default_threshold`. Cada entrada del resultado incluye `limit`, `margin_pp` y `exceeded` para que el caller decida cómo presentar la info.
+- **Display de `make insights`**: cada posición muestra su límite efectivo y margen (o "EXCEDIDO en X pp"). Resumen al final: "✓ Todas dentro de su límite" o "⚠ N por encima".
+- 3 tests nuevos en `test_metrics.py` cubriendo: límites por ISIN, fallback a default_threshold, no-limit cuando ninguno se provee.
+
 ### Added — Performance & docs (post-refactor)
 
 - **`core/cache.py`** + flag `--refresh`: cache pickle de `(snapshot, txs)` con TTL=5min. Encadena `make insights` / `make portfolio` / `make backfill-snapshots` sin re-fetch innecesario. Login a TR se evita totalmente cuando hay cache fresco.

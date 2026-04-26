@@ -253,6 +253,47 @@ class ConcentrationTests(unittest.TestCase):
         s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=100, positions=())
         self.assertEqual(concentration(s), [])
 
+    def test_per_asset_limits_within(self):
+        positions = (
+            Position(isin="A", title="SP500", net_value_eur=4500, broker="t"),
+            Position(isin="B", title="Solana", net_value_eur=300, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        c = concentration(s, limits={"A": 0.50, "B": 0.08})
+        # A: 4500/4800 = 93.75% — over its 50% limit
+        # B: 300/4800 = 6.25% — under its 8% limit
+        a = next(x for x in c if x["isin"] == "A")
+        b = next(x for x in c if x["isin"] == "B")
+        self.assertAlmostEqual(a["limit"], 0.50)
+        self.assertTrue(a["exceeded"])
+        self.assertAlmostEqual(a["margin_pp"], (0.50 - 0.9375) * 100, places=2)
+        self.assertAlmostEqual(b["limit"], 0.08)
+        self.assertFalse(b["exceeded"])
+        self.assertAlmostEqual(b["margin_pp"], (0.08 - 0.0625) * 100, places=2)
+
+    def test_falls_back_to_default_threshold(self):
+        positions = (
+            Position(isin="A", title="A", net_value_eur=4000, broker="t"),
+            Position(isin="B", title="B", net_value_eur=1000, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        # Solo A tiene límite explícito; B usa default_threshold
+        c = concentration(s, limits={"A": 0.50}, default_threshold=0.30)
+        a = next(x for x in c if x["isin"] == "A")
+        b = next(x for x in c if x["isin"] == "B")
+        self.assertAlmostEqual(a["limit"], 0.50)
+        self.assertAlmostEqual(b["limit"], 0.30)
+        self.assertTrue(a["exceeded"])  # 80% > 50%
+        self.assertFalse(b["exceeded"])  # 20% < 30%
+
+    def test_no_limit_when_neither_provided(self):
+        positions = (Position(isin="A", title="A", net_value_eur=1000, broker="t"),)
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        c = concentration(s)  # no limits, no default
+        self.assertIsNone(c[0]["limit"])
+        self.assertIsNone(c[0]["margin_pp"])
+        self.assertFalse(c[0]["exceeded"])
+
 
 class WealthTests(unittest.TestCase):
     def test_total_combines_cash_and_positions(self):
