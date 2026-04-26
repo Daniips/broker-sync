@@ -43,6 +43,39 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y [
 - Code comments and docstrings in `core/`, `brokers/`, `storage/` are bilingual (English + Spanish).
 - `ARCHITECTURE.md` reescrito reflejando la estructura actual y el patrón core/brokers/storage.
 
+### Changed — `sync_renta` extracted to `reports/renta_es.py`
+
+- ~600 líneas de lógica IRPF española movidas a `reports/renta_es.py`. `tr_sync.py` baja de ~2380 a ~1925 líneas (-455).
+- Constantes config-derivadas (`DIVIDEND_SUBTITLES`, `BOND_*_SUBTITLES`, `GIFT_COST_OVERRIDES`, `CRYPTO_ISINS`) se quedan en `tr_sync.py` y `reports.renta_es` las referencia vía `tr_sync.X`.
+- Shims de compat en `tr_sync.py` (`_collect_*`, `_build_lots_and_sales`, `_retentions_by_country`) para que tests existentes y consumidores externos no rompan. Lazy import desde el shim → cero ciclo de imports.
+- Nueva carpeta `reports/` para futuros regímenes fiscales (UK ISA, DE Steuerbericht, PT IRS, etc.) — cada uno como módulo hermano consumiendo `core.fifo` y `brokers/tr/parser.py`.
+
+### Added — Performance attribution per posición
+
+- **`core.metrics.per_position_attribution()`**: para cada posición viva, calcula su MWR individual (XIRR sobre los flujos del ISIN: BUYs, SELLs, DIVIDENDs + valor actual) y su contribución ponderada al rendimiento de la cartera (`MWR × value_pct`).
+- **Bloque "ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN"** en `make insights`. Tabla ordenada por contribución absoluta. Muestra qué posiciones llevan el peso del rendimiento y cuáles arrastran.
+- 4 tests nuevos en `test_metrics.py`.
+
+### Added — Benchmark comparison
+
+- **`benchmark_isin`** y **`benchmark_label`** (config nuevo): activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. Compara tu MWR (modo income) contra rendimiento anualizado del benchmark en all-time / YTD / 12m con Δ en pp.
+- **`core.metrics.benchmark_return()`**: función pura que calcula el rendimiento anualizado de un benchmark entre dos fechas a partir de su histórico de precios.
+- **Cache extendido** (`core.cache.py` v2): `(snapshot, txs, benchmarks)` en vez de solo `(snapshot, txs)`. Una sola login + descarga por sesión, también para benchmarks. Versión bumpeada para invalidar caches antiguos automáticamente.
+- 6 tests nuevos en `test_metrics.py` para `benchmark_return` (incluyendo periodos cortos extrapolados, retornos negativos, edge cases).
+
+### Added — Currency exposure & MWR sanity export
+
+- **`asset_currencies`** (config nuevo): dict `{ISIN: divisa}`. Activa el bloque "EXPOSICIÓN POR DIVISA" en `make insights` que agrupa el patrimonio total (cash + posiciones) por divisa de denominación. ISINs sin entrada van a "UNKNOWN".
+- **`core.metrics.currency_exposure()`**: función pura agnóstica de broker.
+- **`make mwr-flows`** (`tr_sync.py --mwr-flows [--bonus-as deposit]`): exporta los flujos de caja del MWR en TSV para que pegues en Sheets/Excel y verifiques con `=XIRR` nativo. Útil como sanity check del MWR all-time.
+- 3 tests nuevos en `test_metrics.py` para currency exposure.
+
+### Added — Solana en backfill
+
+- **TR expone Solana en exchange `BHS`** (Bitstamp Handelssystem). El campo viene en `compactPortfolio.exchangeIds`, ya capturado por el adapter desde el refactor anterior.
+- **`fetch_instrument_exchanges()`** en el adapter TR: consulta `instrument_details(isin)` para descubrir exchanges no hardcoded. Usado como último fallback en `fetch_price_history_with_fallback`.
+- **Determinismo en backfill**: timestamps normalizados a `T12:00:00`. Re-ejecutar `make backfill-snapshots` ya no genera filas duplicadas (dedup por ts ahora funciona).
+
 ### Added — Per-asset concentration limits
 
 - **`concentration_limits`** (config nuevo): dict `{ISIN: float}` para definir un máximo individual por activo. Sobrescribe el `concentration_threshold` global. Útil para tener tolerancias distintas por tipo de activo (core ETFs alto, cripto bajo).

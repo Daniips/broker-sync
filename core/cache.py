@@ -31,7 +31,7 @@ from core.types import PortfolioSnapshot, Transaction
 
 
 DEFAULT_TTL = timedelta(minutes=5)
-_CACHE_VERSION = 1   # bump si cambia el shape de Transaction/Position/Snapshot
+_CACHE_VERSION = 2   # bump si cambia el shape de Transaction/Position/Snapshot/cache
 
 log = logging.getLogger("tr_sync")
 
@@ -40,8 +40,11 @@ def load_cached_session(
     cache_path: Path,
     *,
     ttl: timedelta = DEFAULT_TTL,
-) -> Optional[tuple[PortfolioSnapshot, list[Transaction]]]:
-    """Devuelve (snapshot, txs) si hay cache fresco, o None.
+) -> Optional[tuple[PortfolioSnapshot, list[Transaction], dict[str, list[dict]]]]:
+    """Devuelve (snapshot, txs, benchmarks) si hay cache fresco, o None.
+
+    `benchmarks` es `{ISIN: price_history_list}` para los ISINs benchmark
+    cacheados con la sesión. Vacío `{}` si nunca se pidió ninguno.
 
     `ttl`: edad máxima del cache antes de considerarlo stale.
     Cualquier error al cargar (fichero no existe, pickle corrupto, versión
@@ -69,18 +72,23 @@ def load_cached_session(
         return None
     snapshot = data.get("snapshot")
     txs = data.get("txs")
+    benchmarks = data.get("benchmarks") or {}
     if not isinstance(snapshot, PortfolioSnapshot) or not isinstance(txs, list):
         return None
+    if not isinstance(benchmarks, dict):
+        benchmarks = {}
     log.info(f"   ⚡ usando cache TR (edad: {age.total_seconds():.0f}s, TTL: {ttl.total_seconds():.0f}s)")
-    return snapshot, txs
+    return snapshot, txs, benchmarks
 
 
 def save_cached_session(
     cache_path: Path,
     snapshot: PortfolioSnapshot,
     txs: list[Transaction],
+    *,
+    benchmarks: Optional[dict[str, list[dict]]] = None,
 ) -> None:
-    """Guarda (snapshot, txs) al disco. Best-effort: si falla, no rompe."""
+    """Guarda (snapshot, txs, benchmarks) al disco. Best-effort: si falla, no rompe."""
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with open(cache_path, "wb") as f:
@@ -89,6 +97,7 @@ def save_cached_session(
                 "cached_at": datetime.now(),
                 "snapshot": snapshot,
                 "txs": txs,
+                "benchmarks": benchmarks or {},
             }, f)
     except Exception as e:
         log.debug(f"cache: no se pudo guardar ({e})")

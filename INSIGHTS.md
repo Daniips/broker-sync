@@ -144,6 +144,53 @@ Es la suma de todas tus compras menos el dinero que recuperaste por ventas, todo
 
 ---
 
+## Bloque — ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN
+
+Tabla con el MWR individual de cada posición que tienes ahora viva, y cuántos puntos porcentuales aporta al rendimiento ponderado de tu cartera:
+
+```
+ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN (MWR per-ISIN, modo income)
+  Activo                          valor   peso    MWR pos.       aporta
+  ----------------------- ------------ ------ ----------- -----------
+  Core S&P 500 USD (Acc)    4.205,81 €  44.6%   +28.50 %     +12.71 pp
+  S&P 500 Information Tech  1.366,66 €  14.5%   +35.20 %      +5.10 pp
+  Core MSCI Europe EUR        796,82 €   8.5%   +12.40 %      +1.05 pp
+  Solana                      278,21 €   3.0%   -42.10 %      -1.24 pp
+  ...
+  TOTAL contribuciones                                        +XX.XX pp
+```
+
+**Cómo leerlo:**
+- **valor** y **peso**: cuánto pesa esa posición en tu cartera de inversión actual.
+- **MWR pos.**: rentabilidad anualizada de esa posición individual, calculada con XIRR sobre todos sus flujos (BUYs, SELLs parciales, dividendos, valor actual). Honesta, no es un % "desde mi precio medio".
+- **aporta**: contribución de esa posición al rendimiento agregado = `MWR × peso`. Sumando todas → rentabilidad anualizada **de las posiciones vivas**.
+
+**Importante:** La suma de contribuciones **no coincide** con tu MWR all-time del bloque histórico. Razón: aquí solo cuentan posiciones vivas; el MWR all-time también incluye los flujos de posiciones que ya vendiste (NVIDIA, Tesla, Apple, etc.).
+
+**Cuándo te ayuda:** ver de un vistazo qué posiciones llevan el peso del rendimiento y cuáles arrastran. Si una posición pequeña tiene MWR catastrófico (Solana -42%), probablemente no merece la pena darle más peso. Si una grande va lenta pero estable (Europe +12%), sabes que aporta poco pero diversifica.
+
+---
+
+## Bloque opcional — RENTABILIDAD VS BENCHMARK
+
+Solo aparece si tienes `benchmark_isin` definido en `config.yaml`. Compara tu MWR (modo `income`) contra el rendimiento anualizado de un ETF de referencia en los mismos periodos:
+
+```
+RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
+  Periodo            Tu MWR (income)         Benchmark      Δ vs benchmark
+  all-time              +23.08 %         +18.40 %          +4.68 pp ✓
+  YTD (2026)            +17.97 %         +12.30 %          +5.67 pp ✓
+  12 meses              +25.17 %         +18.90 %          +6.27 pp ✓
+```
+
+- **`✓`** aparece cuando bates al benchmark en ese periodo.
+- **Δ positivo en pp** (puntos porcentuales): bates al índice por X pp.
+- **Δ negativo**: estás por debajo. No es necesariamente malo — depende de tu estrategia (más conservador, más diversificado, etc.).
+
+Sin esta línea, "+23%" anual no te dice si vas bien o mal. Con benchmark sí: si el S&P hizo +18% en el mismo periodo y tú haces +23%, has aportado +5pp de "alpha" sobre el mercado. Si hubiera hecho +30% y tú haces +23%, te falta -7pp — quizá estás demasiado en cash o mal diversificado.
+
+---
+
 ## Bloque 4 — APORTACIONES MENSUALES
 
 ```
@@ -243,6 +290,23 @@ No es una recomendación de cambiar nada — es una señal de que **mires** si e
 
 ---
 
+## Bloque opcional — EXPOSICIÓN POR DIVISA
+
+Solo aparece si tienes `asset_currencies` definido en `config.yaml`. Muestra cómo se reparte tu patrimonio total (posiciones + cash) por divisa de denominación:
+
+```
+EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
+  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   1 pos.
+  USD         8.347,12 €  ( 37.0%)  █████████████            5 pos.
+  CRYPTO        278,28 €  (  1.2%)  ▌                        1 pos.
+```
+
+Cuándo te ayuda: si la mayoría de tus inversiones son ETFs USD-denominados pero tu cash sigue en EUR, te das cuenta de que tu **exposición efectiva a USD** es menor de lo que parece — el cash sin invertir está pesando hacia EUR.
+
+ISINs no mapeados van al bucket `UNKNOWN` con un aviso. Para mapearlos, edita `config.yaml > asset_currencies`.
+
+---
+
 ## Bloque opcional — POR POSICIÓN (`--verbose`)
 
 ```
@@ -310,6 +374,16 @@ features:
 ```
 
 Lista completa: `make features`.
+
+**Q: ¿Cómo verifico que el MWR no es un bug numérico?**
+
+Lanza `make mwr-flows` y pega el output (TSV) en una hoja nueva de Sheets/Excel. Aplica `=XIRR(B:B, A:A)` y el resultado debe coincidir con el MWR all-time del bloque histórico (modo `income`). Si discrepa significativamente, hay un bug — abre un issue.
+
+Para verificar el modo `deposit` (con saveback como aportación):
+
+```bash
+make mwr-flows BONUS=deposit
+```
 
 **Q: Quiero un MWR para un periodo concreto que no sea YTD/12m.**
 

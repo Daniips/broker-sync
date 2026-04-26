@@ -98,6 +98,9 @@ insights:
 backfill-snapshots:
 	$(PYTHON) tr_sync.py --backfill-snapshots $(if $(START),--start $(START)) $(if $(FREQ),--frequency $(FREQ))
 
+mwr-flows:
+	$(PYTHON) tr_sync.py --mwr-flows $(if $(BONUS),--bonus-as $(BONUS)) $(if $(LOCALE),--locale $(LOCALE))
+
 features:
 	$(PYTHON) tr_sync.py --features
 

@@ -36,6 +36,9 @@ Toda la configuración por usuario vive en `config.yaml`. Este fichero **no se c
 | `features` | dict | opcional | Toggles individuales por feature (`insights`, `concentration`, `backfill_snapshots`, etc.) — ver sección Features |
 | `concentration_threshold` | float | opcional | % global a partir del cual una posición se marca "alta concentración" cuando no tiene límite explícito (default `0.35`) |
 | `concentration_limits` | dict | opcional | Límite individual por ISIN (override del global). `{ISIN: 0.50, ...}` |
+| `asset_currencies` | dict | opcional | Mapeo `{ISIN: "USD"\|"EUR"\|"CRYPTO"\|...}` para el bloque de exposición por divisa en `make insights`. ISINs sin entrada → "UNKNOWN" |
+| `benchmark_isin` | string | opcional | ISIN contra el que comparar tu MWR (típicamente un ETF S&P 500). Activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. |
+| `benchmark_label` | string | opcional | Etiqueta humana del benchmark mostrada en el output (default: el propio ISIN). |
 | `sheets.snapshots` | string | opcional | Nombre de la pestaña oculta de snapshots agregados (default `_snapshots`) |
 | `sheets.snapshots_positions` | string | opcional | Nombre de la pestaña oculta de snapshots por posición (default `_snapshots_positions`) |
 
@@ -342,6 +345,62 @@ CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
 ```
 
 ISINs **sin entrada** caen al `concentration_threshold` global (marcado como "(global)" en el output para que sepas distinguirlo).
+
+---
+
+## `asset_currencies` (opcional)
+
+Mapeo `{ISIN: divisa}` que `make insights` usa para mostrar tu exposición por divisa de denominación. Sin esto, el bloque no se muestra.
+
+```yaml
+asset_currencies:
+  IE00B5BMR087: USD     # Core S&P 500
+  IE00B3WJKG14: USD     # S&P 500 Information Tech
+  IE00BKM4GZ66: USD     # MSCI EM IMI
+  IE00BF4RFH31: USD     # MSCI World Small Cap
+  IE00B4K48X80: EUR     # Core MSCI Europe
+  IE00BZCQB185: USD     # MSCI India
+  XF000SOL0012: CRYPTO  # Solana
+```
+
+ISINs sin entrada caen en el bucket "UNKNOWN" y se avisa en el output. El cash de la cuenta TR siempre se cuenta como EUR.
+
+Output esperado en `make insights`:
+
+```
+EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
+  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   1 pos.
+  USD         8.347,12 €  ( 37.0%)  █████████████            5 pos.
+  CRYPTO        278,28 €  (  1.2%)  ▌                        1 pos.
+```
+
+---
+
+## `benchmark_isin` (opcional) y `benchmark_label`
+
+ISIN contra el que comparar tu MWR. Activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. Útil para responder a "¿estoy batiendo al mercado o me arrastra?" — sin esto, el MWR está en el aire.
+
+```yaml
+benchmark_isin: IE00B5BMR087
+benchmark_label: "Core S&P 500 USD"
+```
+
+El script descarga el histórico de precios del benchmark vía la misma API que usa el backfill (`aggregateHistoryLight`), calcula su rendimiento anualizado en los mismos periodos que tu MWR (all-time / YTD / 12m), y muestra una tabla con la diferencia en puntos porcentuales.
+
+Asume que el benchmark es **acumulación** (re-invierte dividendos en el precio). Si fuera de distribución, el rendimiento mostrado quedaría conservador (no incluiría los dividendos cobrados).
+
+Output esperado:
+
+```
+RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
+  Periodo            Tu MWR (income)         Benchmark      Δ vs benchmark
+  -------------- ------------------  ----------------  ------------------
+  all-time              +23.08 %         +18.40 %          +4.68 pp ✓
+  YTD (2026)            +17.97 %         +12.30 %          +5.67 pp ✓
+  12 meses              +25.17 %         +18.90 %          +6.27 pp ✓
+```
+
+`✓` aparece cuando bates al benchmark en ese periodo. Sin marca = igual o por debajo.
 
 ---
 

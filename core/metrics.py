@@ -204,6 +204,185 @@ def unrealized_return_user_paid(
     }
 
 
+def per_position_attribution(
+    snapshot: PortfolioSnapshot,
+    txs: list[Transaction],
+    *,
+    bonus_as: BonusAs = "income",
+) -> list[dict]:
+    """MWR per posición + contribución ponderada al rendimiento de la cartera.
+
+    Para cada posición actualmente en cartera:
+      - Filtra los flujos del ISIN: BUYs (negativos), SELLs / DIVIDENDs (positivos).
+      - Añade el valor actual como flujo final positivo.
+      - Calcula XIRR sobre esa serie → `position_mwr`.
+
+    `contribution_pp` = `position_mwr × value_pct × 100` (puntos porcentuales
+    sobre la cartera). La suma de contribuciones aproxima el MWR de las
+    posiciones vivas (NO el MWR all-time del portfolio, que incluye también
+    flujos de posiciones ya vendidas).
+
+    Devuelve `[{isin, title, value, value_pct, position_mwr, contribution_pp}, ...]`
+    ordenado por abs(contribution_pp) descendente. Posiciones cuyo XIRR no
+    converge (típico: holding muy corto, pocos flujos) se omiten.
+    """
+    total_value = snapshot.positions_value_eur
+    if total_value <= 0:
+        return []
+
+    by_isin: dict[str, list[Transaction]] = defaultdict(list)
+    for tx in txs:
+        if tx.isin:
+            by_isin[tx.isin].append(tx)
+
+    out = []
+    for p in snapshot.positions:
+        if not p.isin or p.net_value_eur <= 0:
+            continue
+        position_txs = by_isin.get(p.isin, [])
+        flows: list[tuple[datetime, float]] = []
+        for tx in position_txs:
+            if tx.kind == TxKind.BUY:
+                if tx.is_bonus and bonus_as == "income":
+                    continue
+                flows.append((tx.ts, -abs(tx.amount_eur)))
+            elif tx.kind == TxKind.SELL:
+                flows.append((tx.ts, abs(tx.amount_eur)))
+            elif tx.kind == TxKind.DIVIDEND:
+                flows.append((tx.ts, abs(tx.amount_eur)))
+        if not flows:
+            continue
+        flows.append((snapshot.ts, p.net_value_eur))
+        position_mwr = xirr(flows)
+        if position_mwr is None:
+            continue
+        value_pct = p.net_value_eur / total_value
+        contribution_pp = position_mwr * value_pct * 100.0
+        out.append({
+            "isin": p.isin,
+            "title": p.title,
+            "value": p.net_value_eur,
+            "value_pct": value_pct,
+            "position_mwr": position_mwr,
+            "contribution_pp": contribution_pp,
+        })
+    out.sort(key=lambda x: -abs(x["contribution_pp"]))
+    return out
+
+
+def benchmark_return(
+    price_history: list[dict],
+    start_ts: datetime,
+    end_ts: Optional[datetime] = None,
+) -> Optional[dict]:
+    """Rentabilidad anualizada de un benchmark entre dos fechas.
+
+    `price_history`: lista de bars `{ts: datetime, close: float}` ordenada
+    ascendentemente por ts (lo que devuelve `fetch_price_history`).
+    `start_ts`: fecha inicial (usa el bar más cercano y anterior).
+    `end_ts`: fecha final (default = último bar disponible).
+
+    Devuelve `{start_price, end_price, start_ts, end_ts, total_return,
+    annualized_return, days}` o None si no hay datos suficientes.
+
+    `total_return = end_price/start_price − 1` (acumulado).
+    `annualized_return = (1+total)^(365.25/days) − 1` (anualizado, comparable
+    contra MWR anualizado).
+
+    Asume que el benchmark es un ETF Acc (acumula dividendos en el precio). Si
+    fuera Dist, los dividendos cobrados quedarían fuera y la cifra sería
+    conservadora.
+    """
+    if not price_history:
+        return None
+
+    # Bar de inicio: el más reciente con ts ≤ start_ts. Si no hay ninguno
+    # anterior, usamos el primero (caso "start_ts es anterior al inicio del
+    # histórico" — devolvemos el rendimiento desde que existe data).
+    start_candidates = [b for b in price_history if b["ts"] <= start_ts]
+    start_bar = start_candidates[-1] if start_candidates else price_history[0]
+
+    # Bar de fin
+    if end_ts is None:
+        end_bar = price_history[-1]
+    else:
+        end_candidates = [b for b in price_history if b["ts"] <= end_ts]
+        if not end_candidates:
+            return None
+        end_bar = end_candidates[-1]
+
+    if start_bar["close"] <= 0 or end_bar["close"] <= 0:
+        return None
+    days = (end_bar["ts"] - start_bar["ts"]).days
+    if days <= 0:
+        return None
+
+    total = end_bar["close"] / start_bar["close"] - 1.0
+    try:
+        annualized = (1.0 + total) ** (365.25 / days) - 1.0
+    except (ValueError, OverflowError):
+        return None
+
+    return {
+        "start_price": start_bar["close"],
+        "end_price": end_bar["close"],
+        "start_ts": start_bar["ts"],
+        "end_ts": end_bar["ts"],
+        "total_return": total,
+        "annualized_return": annualized,
+        "days": days,
+    }
+
+
+def currency_exposure(
+    snapshot: PortfolioSnapshot,
+    currency_map: dict[str, str],
+    *,
+    cash_currency: str = "EUR",
+    include_cash: bool = True,
+    unknown_label: str = "UNKNOWN",
+) -> list[dict]:
+    """Distribución del patrimonio por divisa de denominación.
+
+    `currency_map`: ISIN → divisa (`"USD"`, `"EUR"`, etc.). ISINs sin entrada
+    se agrupan bajo `unknown_label`.
+    `cash_currency`: divisa del cash account. Default EUR.
+    `include_cash`: si True (default), añade cash al bucket de `cash_currency`.
+
+    Devuelve `[{currency, value_eur, pct, n_positions}, ...]` ordenado desc por
+    value_eur. `pct` es sobre `total_eur` cuando se incluye cash, sobre
+    `positions_value_eur` cuando no.
+    """
+    by_currency: dict[str, float] = defaultdict(float)
+    n_positions: dict[str, int] = defaultdict(int)
+    for p in snapshot.positions:
+        if p.net_value_eur <= 0:
+            continue
+        cur = currency_map.get(p.isin or "", unknown_label)
+        by_currency[cur] += p.net_value_eur
+        n_positions[cur] += 1
+
+    if include_cash and snapshot.cash_eur > 0:
+        by_currency[cash_currency] += snapshot.cash_eur
+        # No bumpeamos n_positions: cash no es una posición.
+
+    denom = snapshot.total_eur if include_cash else snapshot.positions_value_eur
+    if denom <= 0:
+        return []
+
+    out = [
+        {
+            "currency": cur,
+            "value_eur": value,
+            "pct": value / denom,
+            "n_positions": n_positions.get(cur, 0),
+        }
+        for cur, value in by_currency.items()
+    ]
+    out.sort(key=lambda x: -x["value_eur"])
+    return out
+
+
 def concentration(
     snapshot: PortfolioSnapshot,
     *,

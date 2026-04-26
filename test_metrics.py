@@ -4,12 +4,15 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core.metrics import (
+    benchmark_return,
     concentration,
     contribution_vs_average,
     cost_basis_of_current_holdings,
     cost_basis_total,
+    currency_exposure,
     monthly_contributions,
     mwr,
+    per_position_attribution,
     positions_value,
     simple_return,
     total_invested,
@@ -293,6 +296,161 @@ class ConcentrationTests(unittest.TestCase):
         self.assertIsNone(c[0]["limit"])
         self.assertIsNone(c[0]["margin_pp"])
         self.assertFalse(c[0]["exceeded"])
+
+
+class PerPositionAttributionTests(unittest.TestCase):
+    def test_single_position_full_attribution(self):
+        # Bought 1000€ of X1 1 year ago, now worth 1100€.
+        # Position MWR ≈ 10%; weight 100%; contribution ~10pp.
+        txs = [buy(t(2025, 1, 1), 1000, isin="X1")]
+        s = PortfolioSnapshot(
+            ts=t(2026, 1, 1), cash_eur=0,
+            positions=(Position(isin="X1", title="X1", net_value_eur=1100, broker="t"),),
+        )
+        attr = per_position_attribution(s, txs)
+        self.assertEqual(len(attr), 1)
+        self.assertAlmostEqual(attr[0]["position_mwr"], 0.10, places=2)
+        self.assertAlmostEqual(attr[0]["value_pct"], 1.0)
+        self.assertAlmostEqual(attr[0]["contribution_pp"], 10.0, places=1)
+
+    def test_two_positions_sorted_by_abs_contribution(self):
+        # X1: bought 1000, now 1100 → +10% MWR, weight 1100/1300 ≈ 84.6% → ~+8.5pp
+        # X2: bought 500,  now 200  → very negative MWR, weight ~15.4% → big negative pp
+        txs = [
+            buy(t(2025, 1, 1), 1000, isin="X1"),
+            buy(t(2025, 1, 1), 500, isin="X2"),
+        ]
+        positions = (
+            Position(isin="X1", title="X1", net_value_eur=1100, broker="t"),
+            Position(isin="X2", title="X2", net_value_eur=200, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 1, 1), cash_eur=0, positions=positions)
+        attr = per_position_attribution(s, txs)
+        self.assertEqual(len(attr), 2)
+        # Both contributions are large in absolute value; X2 (-60% MWR ≈ −9pp) is bigger absolute
+        # X1 contributes ~+8.5pp; X2 ~-9.2pp. abs(X2) > abs(X1) → X2 first.
+        self.assertEqual(attr[0]["isin"], "X2")
+        self.assertEqual(attr[1]["isin"], "X1")
+        self.assertLess(attr[0]["contribution_pp"], 0)
+        self.assertGreater(attr[1]["contribution_pp"], 0)
+
+    def test_dividends_increase_position_mwr(self):
+        # Same buy 1000€, current value 1000€ (flat), but with 50€ dividend → ~5% MWR
+        txs_no_div = [buy(t(2025, 1, 1), 1000, isin="X1")]
+        txs_div = txs_no_div + [dividend(t(2025, 7, 1), 50, isin="X1")]
+        s = PortfolioSnapshot(
+            ts=t(2026, 1, 1), cash_eur=0,
+            positions=(Position(isin="X1", title="X1", net_value_eur=1000, broker="t"),),
+        )
+        a_no = per_position_attribution(s, txs_no_div)
+        a_with = per_position_attribution(s, txs_div)
+        self.assertAlmostEqual(a_no[0]["position_mwr"], 0.0, places=3)
+        self.assertGreater(a_with[0]["position_mwr"], 0.04)
+
+    def test_skips_position_without_flows(self):
+        # Position exists in snapshot but no txs → can't compute, skipped.
+        s = PortfolioSnapshot(
+            ts=t(2026, 1, 1), cash_eur=0,
+            positions=(Position(isin="X1", title="X1", net_value_eur=1000, broker="t"),),
+        )
+        attr = per_position_attribution(s, [])
+        self.assertEqual(attr, [])
+
+
+class BenchmarkReturnTests(unittest.TestCase):
+    def test_one_year_10pct_gain(self):
+        history = [
+            {"ts": t(2025, 1, 1), "close": 100.0},
+            {"ts": t(2025, 7, 1), "close": 105.0},
+            {"ts": t(2026, 1, 1), "close": 110.0},
+        ]
+        r = benchmark_return(history, t(2025, 1, 1), t(2026, 1, 1))
+        self.assertAlmostEqual(r["total_return"], 0.10)
+        # Exactly 365 days → annualized ≈ 10%.
+        self.assertAlmostEqual(r["annualized_return"], 0.10, places=2)
+
+    def test_short_period_extrapolates_correctly(self):
+        # 6 months at +5% → annualized ~10.25% (1.05^2 - 1)
+        history = [
+            {"ts": t(2025, 1, 1), "close": 100.0},
+            {"ts": t(2025, 7, 1), "close": 105.0},
+        ]
+        r = benchmark_return(history, t(2025, 1, 1), t(2025, 7, 1))
+        self.assertAlmostEqual(r["total_return"], 0.05, places=4)
+        # ~181 days; annualized ≈ (1.05)^(365.25/181) - 1 ≈ 0.1037
+        self.assertGreater(r["annualized_return"], 0.10)
+        self.assertLess(r["annualized_return"], 0.105)
+
+    def test_negative_return(self):
+        history = [
+            {"ts": t(2025, 1, 1), "close": 100.0},
+            {"ts": t(2026, 1, 1), "close": 90.0},
+        ]
+        r = benchmark_return(history, t(2025, 1, 1), t(2026, 1, 1))
+        self.assertAlmostEqual(r["total_return"], -0.10)
+        self.assertAlmostEqual(r["annualized_return"], -0.10, places=2)
+
+    def test_returns_none_if_history_empty(self):
+        self.assertIsNone(benchmark_return([], t(2025, 1, 1)))
+
+    def test_returns_none_if_dates_collide(self):
+        history = [{"ts": t(2025, 1, 1), "close": 100.0}]
+        # start_ts after end_ts → no candidate for end → days <= 0
+        r = benchmark_return(history, t(2025, 1, 1), t(2025, 1, 1))
+        self.assertIsNone(r)
+
+    def test_uses_last_bar_when_end_ts_none(self):
+        history = [
+            {"ts": t(2025, 1, 1), "close": 100.0},
+            {"ts": t(2025, 6, 1), "close": 110.0},
+            {"ts": t(2025, 12, 1), "close": 115.0},
+        ]
+        r = benchmark_return(history, t(2025, 1, 1))  # no end_ts
+        # Should use last bar at 2025-12-01
+        self.assertAlmostEqual(r["end_price"], 115.0)
+
+
+class CurrencyExposureTests(unittest.TestCase):
+    def test_groups_by_currency_and_sorts_desc(self):
+        positions = (
+            Position(isin="A", title="USD ETF", net_value_eur=4000, broker="t"),
+            Position(isin="B", title="EUR ETF", net_value_eur=800, broker="t"),
+            Position(isin="C", title="USD ETF 2", net_value_eur=1200, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        e = currency_exposure(s, {"A": "USD", "B": "EUR", "C": "USD"}, include_cash=False)
+        self.assertEqual(e[0]["currency"], "USD")
+        self.assertAlmostEqual(e[0]["value_eur"], 5200)
+        self.assertEqual(e[0]["n_positions"], 2)
+        self.assertEqual(e[1]["currency"], "EUR")
+        self.assertAlmostEqual(e[1]["value_eur"], 800)
+
+    def test_includes_cash_in_default_eur(self):
+        positions = (Position(isin="A", title="USD", net_value_eur=4000, broker="t"),)
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=6000, positions=positions)
+        e = currency_exposure(s, {"A": "USD"})
+        # USD: 4000 (positions). EUR: 6000 (cash).
+        eur = next(x for x in e if x["currency"] == "EUR")
+        usd = next(x for x in e if x["currency"] == "USD")
+        self.assertAlmostEqual(eur["value_eur"], 6000)
+        self.assertAlmostEqual(usd["value_eur"], 4000)
+        self.assertAlmostEqual(eur["pct"], 0.6)
+        self.assertAlmostEqual(usd["pct"], 0.4)
+        # Cash isn't a position so n_positions stays 0 for EUR
+        self.assertEqual(eur["n_positions"], 0)
+        self.assertEqual(usd["n_positions"], 1)
+
+    def test_unknown_isin_goes_to_default_label(self):
+        positions = (
+            Position(isin="A", title="A", net_value_eur=1000, broker="t"),
+            Position(isin="B", title="B", net_value_eur=500, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        e = currency_exposure(s, {"A": "USD"}, include_cash=False)
+        # Only A has currency; B falls to UNKNOWN
+        labels = {x["currency"] for x in e}
+        self.assertIn("USD", labels)
+        self.assertIn("UNKNOWN", labels)
 
 
 class WealthTests(unittest.TestCase):

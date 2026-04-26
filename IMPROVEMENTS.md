@@ -10,33 +10,28 @@ Lista priorizada de cosas a mejorar en el proyecto, escritas para que dentro de 
 - **Cache TR** — `core/cache.py` con TTL=5min, evita re-fetch entre comandos. `--refresh` para invalidar.
 - **Tests del adapter TR** — `test_adapter.py` con 24 tests cubriendo cada eventType (parser mockeado).
 - **Per-asset concentration limits** — campo `concentration_limits: {ISIN: float}` en config. Soporta `concentration_threshold: null` para apagar el global y solo alertar lo configurado.
+- **Solana en backfill** — exchange `BHS` capturado vía compactPortfolio. Fallback `instrument_details(isin)` para descubrir exchanges no hardcoded.
+- **Determinismo en backfill** — timestamps normalizados a `T12:00:00`. Re-runs no duplican filas.
+- **Currency exposure** — campo `asset_currencies: {ISIN: divisa}` + bloque nuevo en `make insights` agrupando patrimonio (cash + posiciones) por divisa.
+- **`make mwr-flows`** — vuelca los flujos de caja del MWR en TSV para sanity check con XIRR nativo de Sheets/Excel. Soporta `LOCALE=es` para coma decimal.
+- **MWR sanity check humano** — verificado vs `=TIR.NO.PER` de Sheets, diferencia 0,02pp (rounding). MWR all-time es real.
+- **Benchmark vs MWR** — campo `benchmark_isin` en config. `make insights` compara tu MWR (modo income) contra el rendimiento anualizado del benchmark en all-time / YTD / 12m, con Δ en pp y marca `✓` si bates al índice.
 
 ---
 
 ## Prioridad alta
 
-### 1. `tr_sync.py` sigue en ~2300 líneas
+### 1. ~~Sacar sync_renta a reports/renta_es.py~~ ✅ HECHO
 
-El elefante restante es **`sync_renta`** (~500 líneas, FIFO + dividendos + intereses + bonos + Modelo 720, todo Spain-specific). Sacarlo a `reports/renta_es.py` deja `tr_sync.py` ~1700 líneas y formaliza que Renta es un report **plug-in** específico de España. Cuando llegue otro régimen fiscal (UK ISA / DE Steuerbericht / PT IRS) cuadra el patrón.
+`reports/renta_es.py` (~720 líneas) contiene toda la lógica del informe IRPF español. `tr_sync.py` baja a ~1925 líneas. Shims de compat en tr_sync.py (`_collect_*`, `_build_lots_and_sales`, `_retentions_by_country`) para que tests existentes no rompan. Cuando llegue otro régimen fiscal (UK ISA / DE Steuerbericht / PT IRS) se añade un módulo hermano sin tocar tr_sync.
 
-**Esfuerzo**: ~1-2h. **Beneficio**: separación de concerns; ningún cambio de comportamiento; abre la puerta a otros report types.
+### 2. Sanity check del MWR all-time (parcialmente automatizado)
 
-### 2. Sanity check del MWR all-time
+Ya hay herramienta para verificarlo: `make mwr-flows` vuelca los flujos en TSV. Pega en Sheets/Excel y aplica `=XIRR(B:B, A:A)`. Pendiente la verificación humana.
 
-El MWR all-time actual (+23,08% income / +19,66% deposit) **huele alto** para una cartera 60% S&P en 18 meses. Posibles causas legítimas: comprar en bajadas + dividendos + ventas con beneficio. Posibles causas técnicas: bug sutil en `mwr()` que las pruebas sintéticas no atrapan.
+### 3. ~~Solana en backfill~~ ✅ HECHO
 
-**Acción**: copiar los flujos de SP500 (BUYs + dividendos + valor actual) a una hoja nueva con XIRR formula nativa de Sheets/Excel. Comparar contra el +23%. Si discrepa significativamente, debug. Si cuadra, documentarlo.
-
-**Esfuerzo**: ~30min de Excel. **Beneficio**: confianza real en el número.
-
-### 3. Solana en backfill
-
-Solana no se cubre en `backfill-snapshots` porque `aggregateHistoryLight` con LSX/BTLX/BSF no devuelve datos. Investigar:
-- Si pytr expone `instrumentDetails(isin)` que indique los exchanges disponibles por ISIN.
-- Si TR tiene un topic distinto para cripto (`cryptoOhlcHistory`, `cryptoPriceHistory`).
-- Fallback: Coingecko vía API gratuita (mapping ISIN ↔ Coingecko ID en config).
-
-**Esfuerzo**: ~1-2h investigando + integración. **Beneficio**: backfill cubre 100% de la cartera. Crítico si llega un usuario crypto-pesado.
+Resuelto: TR expone Solana en exchange `BHS` (Bitstamp Handelssystem) y compactPortfolio incluye el field `exchangeIds`. Caso futuro de fallback (ISIN cripto sin exchange en compactPortfolio): `fetch_instrument_exchanges()` consulta `instrument_details(isin)` para descubrir.
 
 ---
 
@@ -55,35 +50,13 @@ Escribe directo a `_snapshots`. Útil para correcciones puntuales.
 
 **Esfuerzo**: ~30min. **Beneficio**: control fino sobre el histórico.
 
-### 5. Benchmark comparison vs índice de referencia
+### 5. ~~Benchmark comparison vs índice de referencia~~ ✅ HECHO
 
-Mostrar el MWR de tu cartera **al lado del rendimiento de un benchmark** (S&P 500, MSCI World, etc.) en el mismo periodo. Responde a: "¿estoy batiendo al mercado o me estoy comiendo costes/decisiones malas?".
+Implementado: campo `benchmark_isin` en config + bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. Compara tu MWR contra rendimiento anualizado del benchmark en all-time / YTD / 12m con Δ en pp. Ver `CONFIG.md` y `INSIGHTS.md`.
 
-```
-RENTABILIDAD VS BENCHMARK (12 meses)
-  Tu cartera (MWR):       +25,17 %
-  S&P 500 (€):            +18,40 %
-  Δ vs benchmark:          +6,77 pp  ← bates al índice
-```
+### 6. ~~Currency exposure breakdown~~ ✅ HECHO
 
-Implementación: configurar un `benchmark_isin` (ej. iShares Core S&P 500 EUR), descargar su histórico de precios con `aggregateHistoryLight` (ya lo soportamos), calcular el rendimiento del benchmark en YTD/12m/all-time desde su precio inicial.
-
-**Esfuerzo**: ~1h. **Beneficio**: contexto real para tu MWR — sin esto, no sabes si +25% es bueno o malo.
-
-### 6. Currency exposure breakdown
-
-Tu cartera tiene exposición a USD (ETFs USA), EUR (MSCI Europe, cash) y otros (cripto). El riesgo de divisa no es obvio en `make insights`. Añadir un pequeño bloque:
-
-```
-EXPOSICIÓN POR DIVISA
-  USD       7.430,28 €  (78,9 %)   ← S&P, tech, EM IMI, India, Small Cap
-  EUR       2.069,77 €  (21,9 %)   ← MSCI Europe + cash en EUR
-  OTROS       278,28 €  ( 3,0 %)   ← Solana
-```
-
-Implementación: mapping ISIN → divisa de denominación en config (`asset_currencies: {ISIN: "USD"}`), agrupar `net_value_eur` por divisa.
-
-**Esfuerzo**: ~30min. **Beneficio**: ver de un vistazo si tienes demasiada exposición a una divisa concreta.
+Implementado: `asset_currencies` en config + bloque "EXPOSICIÓN POR DIVISA" en `make insights`. Ver `CONFIG.md` y `INSIGHTS.md`.
 
 ### 7. Telemetría / logging persistente
 
@@ -111,22 +84,9 @@ EVENT_HANDLERS = {
 
 **Esfuerzo**: ~1h. **Beneficio**: más fácil añadir event types nuevos; tests por handler en vez de por función gigante.
 
-### 9. Performance attribution por posición
+### 9. ~~Performance attribution por posición~~ ✅ HECHO
 
-Hoy sabes que tu cartera rinde +25% MWR pero no qué posición lo aporta. Mostrar contribución de cada activo al rendimiento total:
-
-```
-ATRIBUCIÓN DE RENDIMIENTO (12m)
-  S&P 500             +14,2 pp   ████████████████
-  SP500 Tech          +5,8 pp    ████████
-  MSCI Europe         +1,4 pp    ██
-  Solana              −1,3 pp    ─
-  TOTAL              +25,2 pp
-```
-
-Implementación: cada posición con su MWR individual, ponderado por % de cartera. Requiere más esfuerzo: segregar flujos por ISIN y calcular XIRR per-position.
-
-**Esfuerzo**: ~2-3h. **Beneficio**: te dice qué posiciones están funcionando y cuáles arrastran.
+Implementado: `core.metrics.per_position_attribution()` + bloque "ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN" en `make insights`. MWR individual por ISIN ponderado por peso en cartera. Ver `INSIGHTS.md`.
 
 ---
 
