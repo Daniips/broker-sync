@@ -94,6 +94,9 @@ renta:
 insights:
 	$(PYTHON) tr_sync.py --insights
 
+backfill-snapshots:
+	$(PYTHON) tr_sync.py --backfill-snapshots $(if $(START),--start $(START)) $(if $(FREQ),--frequency $(FREQ))
+
 # ── Targets opcionales para GitHub Actions ────────────────────────────────
 # Requieren `gh` CLI autenticado y la variable REPO=tu_usuario/tu_repo.
 

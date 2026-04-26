@@ -79,6 +79,7 @@ def raw_event_to_tx(
     shares: Optional[float] = None
     amount_eur: Optional[float] = None
     is_bonus = False
+    from_cash = True
 
     if et in {"TRADING_TRADE_EXECUTED", "TRADING_SAVINGSPLAN_EXECUTED", "TRADE_INVOICE"}:
         if value is None:
@@ -104,6 +105,7 @@ def raw_event_to_tx(
         kind = TxKind.BUY
         amount_eur = -abs(float(value))
         is_bonus = True
+        from_cash = False  # saveback shares are TR-funded, not user cash
 
     elif et in {"GIFTING_RECIPIENT_ACTIVITY", "GIFTING_LOTTERY_PRIZE_ACTIVITY"}:
         g = extract_gift_details(raw)
@@ -125,6 +127,7 @@ def raw_event_to_tx(
         # Saveback (delivered against your spending) is the only case where the
         # share is genuinely "free money" and gets is_bonus=True.
         is_bonus = False
+        from_cash = False  # gifts are TR-funded (no cash deducted from user)
 
     elif et == "SSP_CORPORATE_ACTION_CASH":
         if value is None:
@@ -177,6 +180,7 @@ def raw_event_to_tx(
         isin=isin,
         shares=shares,
         is_bonus=is_bonus,
+        from_cash=from_cash,
     )
 
 
@@ -208,6 +212,134 @@ async def fetch_transactions(
     return txs
 
 
+async def fetch_price_history(
+    tr,
+    isin: str,
+    *,
+    range_str: str = "1y",
+    exchange: str = "LSX",
+    topic: str = "aggregateHistoryLight",
+    timeout: float = 10.0,
+    debug: bool = False,
+) -> list[dict]:
+    """Fetch historical OHLC bars for an ISIN via TR's WebSocket subscription.
+
+    `topic`: TR subscription type. "aggregateHistoryLight" (default) is the
+    current name; "aggregateHistory" was deprecated. Try "aggregateHistory" or
+    "chartHistory" as fallbacks if needed.
+    `range_str`: "1d" / "5d" / "1m" / "3m" / "1y" / "5y" / "max".
+    `exchange`: TR market identifier; default "LSX" (Lang & Schwarz).
+
+    Returns list of {ts: datetime (UTC), close: float} sorted by ts ascending.
+    Returns [] on error and logs the actual cause.
+    """
+    import asyncio as _asyncio
+    import logging
+    from datetime import timezone
+
+    log = logging.getLogger("tr_sync")
+
+    sub_id = None
+    try:
+        # Bypass pytr's `performance_history` helper because it hardcodes
+        # "aggregateHistory" which TR has deprecated. Subscribe with our topic.
+        sub_id = await tr.subscribe({
+            "type": topic,
+            "id": f"{isin}.{exchange}",
+            "range": range_str,
+        })
+        result = await _asyncio.wait_for(tr._recv_subscription(sub_id), timeout=timeout)
+    except _asyncio.TimeoutError:
+        log.warning(f"   ⏱  timeout esperando {topic} para {isin}.{exchange}")
+        return []
+    except Exception as e:
+        log.warning(f"   ⚠  error en {topic} para {isin}.{exchange}: {type(e).__name__}: {e}")
+        return []
+    finally:
+        if sub_id is not None:
+            try:
+                await tr.unsubscribe(sub_id)
+            except Exception:
+                pass
+
+    if debug:
+        keys = list(result.keys()) if isinstance(result, dict) else type(result).__name__
+        log.info(f"   [debug] respuesta {isin}: keys={keys}")
+
+    if not isinstance(result, dict):
+        log.warning(f"   ⚠  respuesta no-dict para {isin}: {type(result).__name__}")
+        return []
+    aggs = result.get("aggregates")
+    if aggs is None:
+        aggs = result.get("data") or []
+    if not isinstance(aggs, list):
+        log.warning(f"   ⚠  no encontré lista de bars en respuesta para {isin}: keys={list(result.keys())}")
+        return []
+
+    out = []
+    for bar in aggs:
+        if not isinstance(bar, dict):
+            continue
+        time_val = bar.get("time") or bar.get("timestamp") or bar.get("t")
+        close = bar.get("close") if "close" in bar else bar.get("c")
+        if time_val is None or close is None:
+            continue
+        try:
+            ts_sec = float(time_val) / 1000.0 if float(time_val) > 1e11 else float(time_val)
+            ts = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
+            out.append({"ts": ts, "close": float(close)})
+        except (ValueError, TypeError, OSError):
+            continue
+    out.sort(key=lambda x: x["ts"])
+    if debug:
+        log.info(f"   [debug] {isin}: {len(out)} barras parseadas")
+    return out
+
+
+async def fetch_price_history_with_fallback(
+    tr,
+    isin: str,
+    *,
+    range_str: str = "1y",
+    exchanges: Optional[list[str]] = None,
+    timeout: float = 5.0,
+    debug: bool = False,
+) -> tuple[list[dict], Optional[str]]:
+    """Try several exchanges in order until one returns data.
+
+    Returns (history, exchange_used). If all fail, returns ([], None).
+    Shorter default timeout (5s) than the single-shot version, since we may
+    iterate over several venues.
+    """
+    import logging
+    log = logging.getLogger("tr_sync")
+    if not exchanges:
+        exchanges = ["LSX"]
+    for exch in exchanges:
+        history = await fetch_price_history(
+            tr, isin,
+            range_str=range_str,
+            exchange=exch,
+            timeout=timeout,
+            debug=debug,
+        )
+        if history:
+            if exch != exchanges[0]:
+                log.info(f"   ✓  {isin} encontrado en exchange '{exch}' (fallback)")
+            return history, exch
+    return [], None
+
+
+def price_at(history: list[dict], target: datetime) -> Optional[float]:
+    """Return close price of the latest bar with ts <= target. None if no bar fits."""
+    if not history:
+        return None
+    candidates = [b for b in history if b["ts"] <= target]
+    if not candidates:
+        return None
+    return candidates[-1]["close"]
+
+
 async def fetch_snapshot(tr, *, tz: ZoneInfo) -> PortfolioSnapshot:
     """Build a PortfolioSnapshot from TR's compact portfolio + cash.
 
@@ -224,6 +356,13 @@ async def fetch_snapshot(tr, *, tz: ZoneInfo) -> PortfolioSnapshot:
         shares = float(p.get("netSize") or 0.0)
         avg_buy = float(p.get("averageBuyIn") or 0.0)
         cost_basis = avg_buy * shares if avg_buy > 0 and shares > 0 else None
+        # TR may expose the trading venue under several names. Take the first
+        # non-empty one we recognize. If a list, pick the first entry.
+        exch = p.get("exchangeId") or p.get("exchange") or p.get("tradingVenue")
+        if not exch:
+            exch_list = p.get("exchangeIds") or p.get("availableExchanges")
+            if isinstance(exch_list, list) and exch_list:
+                exch = exch_list[0] if isinstance(exch_list[0], str) else exch_list[0].get("id") if isinstance(exch_list[0], dict) else None
         pos_objs.append(
             Position(
                 isin=p.get("instrumentId") or "?",
@@ -232,6 +371,7 @@ async def fetch_snapshot(tr, *, tz: ZoneInfo) -> PortfolioSnapshot:
                 broker="tr",
                 shares=shares,
                 cost_basis_eur=cost_basis,
+                exchange_id=exch if isinstance(exch, str) else None,
             )
         )
     cash_eur = 0.0

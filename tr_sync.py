@@ -146,6 +146,7 @@ PORTFOLIO_SHEET = _SHEETS["portfolio"]
 STATUS_SHEET = _SHEETS["status"]
 SYNC_STATE_SHEET = _SHEETS["sync_state"]
 SNAPSHOTS_SHEET = _SHEETS.get("snapshots", "_snapshots")
+SNAPSHOTS_POSITIONS_SHEET = _SHEETS.get("snapshots_positions", "_snapshots_positions")
 
 # Año fiscal de la pestaña inversiones (env var > config > año actual)
 INVESTMENTS_SHEET_YEAR = int(
@@ -192,6 +193,10 @@ ASSET_NAME_MAP = CONFIG.get("asset_name_map", {})
 STATUS_LABELS = CONFIG.get("status_labels", {"portfolio": "Portfolio", "sync": "Sync completo"})
 
 DEFAULT_BUFFER_DAYS = int(CONFIG.get("default_buffer_days", 7))
+
+# Threshold (% del valor de posiciones) por encima del cual una posición se
+# marca como "alta concentración" en el bloque de insights.
+CONCENTRATION_THRESHOLD = float(CONFIG.get("concentration_threshold", 0.35))
 
 # Tipos de evento de TR (no van a config porque son de la API y no varían por usuario)
 EXPENSE_EVENT_TYPES = {
@@ -491,39 +496,120 @@ def append_synced_ids(spreadsheet, new_ids):
 # inicio del periodo se modela como "deposit sintético" en `core.metrics.mwr`.
 
 _SNAPSHOTS_HEADER = ["ts", "cash_eur", "positions_value_eur", "cost_basis_eur", "total_eur"]
+_SNAPSHOTS_POSITIONS_HEADER = ["ts", "isin", "title", "shares", "net_value_eur", "cost_basis_eur"]
+
+
+def _create_hidden_sheet(spreadsheet, title, header):
+    ws = spreadsheet.add_worksheet(title=title, rows=1000, cols=len(header))
+    end_col = chr(ord('A') + len(header) - 1)
+    ws.update(values=[header], range_name=f"A1:{end_col}1")
+    spreadsheet.batch_update({"requests": [{
+        "updateSheetProperties": {
+            "properties": {"sheetId": ws.id, "hidden": True},
+            "fields": "hidden",
+        }
+    }]})
+    return ws
 
 
 def get_or_create_snapshots_sheet(spreadsheet):
     try:
         return spreadsheet.worksheet(SNAPSHOTS_SHEET)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=SNAPSHOTS_SHEET, rows=1000, cols=len(_SNAPSHOTS_HEADER))
-        ws.update(values=[_SNAPSHOTS_HEADER], range_name=f"A1:{chr(ord('A')+len(_SNAPSHOTS_HEADER)-1)}1")
-        spreadsheet.batch_update({"requests": [{
-            "updateSheetProperties": {
-                "properties": {"sheetId": ws.id, "hidden": True},
-                "fields": "hidden",
-            }
-        }]})
-        return ws
+        return _create_hidden_sheet(spreadsheet, SNAPSHOTS_SHEET, _SNAPSHOTS_HEADER)
+
+
+def get_or_create_snapshots_positions_sheet(spreadsheet):
+    try:
+        return spreadsheet.worksheet(SNAPSHOTS_POSITIONS_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        return _create_hidden_sheet(spreadsheet, SNAPSHOTS_POSITIONS_SHEET, _SNAPSHOTS_POSITIONS_HEADER)
+
+
+def _snapshot_to_rows(snapshot, cost_basis_total_eur):
+    """Devuelve (agg_row, pos_rows) listos para escribir."""
+    ts_iso = snapshot.ts.isoformat()
+    agg_row = [
+        ts_iso,
+        round(snapshot.cash_eur, 2),
+        round(snapshot.positions_value_eur, 2),
+        round(cost_basis_total_eur or 0.0, 2),
+        round(snapshot.total_eur, 2),
+    ]
+    pos_rows = [
+        [
+            ts_iso,
+            p.isin or "",
+            p.title or "",
+            round(p.shares, 8) if p.shares else 0,
+            round(p.net_value_eur, 2),
+            round(p.cost_basis_eur, 2) if p.cost_basis_eur is not None else "",
+        ]
+        for p in snapshot.positions
+    ]
+    return agg_row, pos_rows
+
+
+def load_snapshot_timestamps(spreadsheet) -> set[str]:
+    """Lee los ts ya escritos en `_snapshots` para deduplicar."""
+    try:
+        ws = spreadsheet.worksheet(SNAPSHOTS_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        return set()
+    rows = ws.get_all_values()
+    return {row[0] for row in rows[1:] if row and row[0]}
 
 
 def append_snapshot_row(spreadsheet, snapshot, cost_basis_total_eur):
-    """Añade una fila a la pestaña `_snapshots` con el estado actual."""
+    """Añade un único snapshot a `_snapshots` y `_snapshots_positions`."""
     from core.metrics import cost_basis_total as _cb_total
-    ws = get_or_create_snapshots_sheet(spreadsheet)
     cb = cost_basis_total_eur if cost_basis_total_eur is not None else (_cb_total(snapshot) or 0.0)
-    ws.append_rows([[
-        snapshot.ts.isoformat(),
-        round(snapshot.cash_eur, 2),
-        round(snapshot.positions_value_eur, 2),
-        round(cb, 2),
-        round(snapshot.total_eur, 2),
-    ]], value_input_option="RAW")
+    agg_row, pos_rows = _snapshot_to_rows(snapshot, cb)
+    ws_agg = get_or_create_snapshots_sheet(spreadsheet)
+    ws_agg.append_rows([agg_row], value_input_option="RAW")
+    if pos_rows:
+        ws_pos = get_or_create_snapshots_positions_sheet(spreadsheet)
+        ws_pos.append_rows(pos_rows, value_input_option="RAW")
+
+
+def append_snapshots_batch(spreadsheet, records, *, skip_existing: bool = True) -> int:
+    """Escribe muchos snapshots en 2 llamadas (una por pestaña).
+
+    Crítico para evitar el rate limit de Sheets API (~60 reads/min/user) cuando
+    haces backfill de muchos snapshots. `records`: list of (snapshot, cost_basis).
+    `skip_existing=True` (default): omite snapshots cuyo ts ya está escrito,
+    permitiendo re-ejecuciones seguras del backfill.
+
+    Devuelve el número de snapshots realmente escritos.
+    """
+    if not records:
+        return 0
+    if skip_existing:
+        existing = load_snapshot_timestamps(spreadsheet)
+        records = [(s, cb) for s, cb in records if s.ts.isoformat() not in existing]
+    if not records:
+        return 0
+    agg_rows = []
+    pos_rows_all = []
+    for snap, cb in records:
+        ag, pos = _snapshot_to_rows(snap, cb)
+        agg_rows.append(ag)
+        pos_rows_all.extend(pos)
+    ws_agg = get_or_create_snapshots_sheet(spreadsheet)
+    ws_agg.append_rows(agg_rows, value_input_option="RAW")
+    if pos_rows_all:
+        ws_pos = get_or_create_snapshots_positions_sheet(spreadsheet)
+        ws_pos.append_rows(pos_rows_all, value_input_option="RAW")
+    return len(records)
 
 
 def load_snapshot_history(spreadsheet) -> list[dict]:
-    """Lee todas las filas de `_snapshots` y devuelve dicts ordenados por ts ascendente."""
+    """Lee todas las filas de `_snapshots` y devuelve dicts ordenados por ts ascendente.
+
+    Usa `parse_de_number` para los floats: tu Sheet puede guardar `1.234,56`
+    según el locale (español/alemán) y `float()` directo peta sobre la coma.
+    """
+    from core.utils import parse_de_number
     try:
         ws = spreadsheet.worksheet(SNAPSHOTS_SHEET)
     except gspread.exceptions.WorksheetNotFound:
@@ -537,15 +623,15 @@ def load_snapshot_history(spreadsheet) -> list[dict]:
             continue
         try:
             ts = datetime.fromisoformat(row[0])
-            out.append({
-                "ts": ts,
-                "cash_eur": float(row[1] or 0),
-                "positions_value_eur": float(row[2] or 0),
-                "cost_basis_eur": float(row[3] or 0),
-                "total_eur": float(row[4] or 0),
-            })
         except (ValueError, IndexError):
             continue
+        out.append({
+            "ts": ts,
+            "cash_eur": parse_de_number(row[1]) or 0.0,
+            "positions_value_eur": parse_de_number(row[2]) or 0.0,
+            "cost_basis_eur": parse_de_number(row[3]) or 0.0,
+            "total_eur": parse_de_number(row[4]) or 0.0,
+        })
     out.sort(key=lambda x: x["ts"])
     return out
 
@@ -1053,6 +1139,141 @@ def debug_isin(isin: str):
     print(f"  saveback a precio merc.: {cb_full.get(isin, 0.0):>12,.2f} €")
 
 
+def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly"):
+    """Reconstruye snapshots históricos y los persiste en `_snapshots` (+ posiciones).
+
+    Para cada fecha histórica D entre `start` y hoy (a la cadencia indicada):
+      - Calcula shares de cada ISIN actual en D (retrocediendo desde el snapshot
+        actual aplicando la inversa de cada BUY/SELL posterior a D).
+      - Calcula cash en D (retrocediendo flujos `from_cash=True`).
+      - Consulta a TR el precio histórico de cada ISIN para D.
+      - Compone el PortfolioSnapshot reconstruido y lo escribe en las pestañas.
+
+    Caveats: ver core/backfill.py. Saveback shares sin info quedan ligeramente
+    sobreestimadas (error <1%); ISINs con price history no disponible se
+    excluyen del positions_value (ej. cripto a veces falla por exchange).
+
+    Args:
+      start_iso: fecha ISO (YYYY-MM-DD) desde la que reconstruir. Default: today − 365 días.
+      frequency: "weekly" | "monthly" | "biweekly". Default "weekly".
+    """
+    from brokers.tr.adapter import fetch_price_history_with_fallback, fetch_snapshot, fetch_transactions, price_at
+    from core.backfill import reconstruct_snapshot_at
+
+    tz = TIMEZONE
+    today = datetime.now(tz=tz)
+    if start_iso:
+        start = datetime.fromisoformat(start_iso).replace(tzinfo=tz)
+    else:
+        start = today - timedelta(days=365)
+
+    if frequency == "weekly":
+        delta = timedelta(days=7)
+    elif frequency == "biweekly":
+        delta = timedelta(days=14)
+    elif frequency == "monthly":
+        delta = timedelta(days=30)
+    else:
+        raise ValueError(f"frequency desconocida: {frequency!r}. Usa weekly|biweekly|monthly.")
+
+    dates = []
+    d = start
+    while d <= today - delta:
+        dates.append(d)
+        d += delta
+    if not dates:
+        log.error(f"No hay fechas a reconstruir entre {start.date()} y {today.date()} con cadencia {frequency}.")
+        return
+
+    # Determine the longest range we need given start date.
+    days_back = (today - start).days
+    if days_back <= 30: range_str = "1m"
+    elif days_back <= 90: range_str = "3m"
+    elif days_back <= 365: range_str = "1y"
+    elif days_back <= 365*5: range_str = "5y"
+    else: range_str = "max"
+
+    log.info("Conectando a Trade Republic...")
+    tr = login()
+
+    # IMPORTANTE: todas las llamadas async tienen que vivir en un único event loop
+    # porque la conexión WebSocket se queda atada al primer loop. Si llamamos
+    # asyncio.run() varias veces seguidas, los siguientes intentos rompen con
+    # "Future attached to a different loop". Por eso lo envolvemos en un solo
+    # async def y un solo asyncio.run().
+    async def _gather():
+        log.info("Descargando snapshot actual y transacciones...")
+        snap = await fetch_snapshot(tr, tz=tz)
+        txs_local = await fetch_transactions(tr, tz=tz, gift_overrides=GIFT_COST_OVERRIDES)
+        log.info(f"   {len(txs_local)} transacciones, {len(snap.positions)} posiciones.\n")
+
+        log.info(f"Descargando histórico de precios (range={range_str}) para {len(snap.positions)} ISINs...")
+        # Construye lista de exchanges a probar por ISIN.
+        # - El que TR devuelve en compactPortfolio (si lo hay) → primero.
+        # - Luego LSX (default para acciones/ETFs).
+        # - Para cripto (CRYPTO_ISINS), añade BTLX y BSF como fallback.
+        crypto_fallbacks = ["BTLX", "BSF"]
+        prices: dict[str, list[dict]] = {}
+        for i, p in enumerate(snap.positions):
+            exchanges = []
+            if p.exchange_id:
+                exchanges.append(p.exchange_id)
+            if "LSX" not in exchanges:
+                exchanges.append("LSX")
+            if p.isin in CRYPTO_ISINS:
+                for ex in crypto_fallbacks:
+                    if ex not in exchanges:
+                        exchanges.append(ex)
+            history, used = await fetch_price_history_with_fallback(
+                tr, p.isin,
+                range_str=range_str,
+                exchanges=exchanges,
+                debug=(i == 0),
+            )
+            prices[p.isin] = history
+            status = f"{len(history)} barras (.{used})" if history else f"n/a (probé {','.join(exchanges)})"
+            log.info(f"   {(p.title or p.isin)[:36]:<36}  {status}")
+        return snap, txs_local, prices
+
+    snapshot, txs, price_history = asyncio.run(_gather())
+
+    if not any(price_history.values()):
+        log.error("\nNinguna posición devolvió histórico de precios. Backfill abortado.")
+        log.error("Posibles causas: aggregateHistory no disponible para ningún ISIN, problema de exchange.")
+        return
+
+    log.info(f"\nReconstruyendo {len(dates)} snapshots ({frequency})...")
+    records: list[tuple] = []
+    for d in dates:
+        prices = {}
+        for isin, history in price_history.items():
+            p = price_at(history, d)
+            if p is not None:
+                prices[isin] = p
+        snap = reconstruct_snapshot_at(d, snapshot, txs, prices)
+        if not snap.positions and snap.cash_eur == snapshot.cash_eur:
+            log.info(f"   {d.date()}  sin actividad — skip")
+            continue
+        records.append((snap, None))
+        log.info(
+            f"   {d.date()}  cash={snap.cash_eur:>9.2f}  "
+            f"pos={snap.positions_value_eur:>9.2f}  total={snap.total_eur:>9.2f}  "
+            f"({len(snap.positions)} pos)"
+        )
+
+    log.info(f"\nEscribiendo {len(records)} snapshots a `{SNAPSHOTS_SHEET}` (en batch, dedup activado)...")
+    spreadsheet = open_spreadsheet()
+    try:
+        written = append_snapshots_batch(spreadsheet, records, skip_existing=True)
+        skipped = len(records) - written
+        log.info(f"OK: {written} nuevos snapshots escritos, {skipped} ya existían (dedup por ts).")
+        if written > 0:
+            log.info(f"   Próximo `make insights` ya tendrá MWR YTD/12m si hay snapshots anteriores al periodo.")
+    except Exception as e:
+        log.error(f"⚠ Falló la escritura batch: {e}")
+        log.error(f"   Si es rate limit, espera 1-2 minutos y vuelve a ejecutar — el dedup omitirá los ya escritos.")
+
+
 def sync_insights(verbose: bool = False):
     """Imprime insights de inversión en consola. No toca la Sheet.
 
@@ -1074,6 +1295,7 @@ def sync_insights(verbose: bool = False):
     """
     from brokers.tr.adapter import fetch_snapshot, fetch_transactions
     from core.metrics import (
+        concentration,
         contribution_vs_average,
         cost_basis_total as _cb_total,
         cost_basis_user_paid_per_isin,
@@ -1199,6 +1421,26 @@ def sync_insights(verbose: bool = False):
             print(f"    {y}-{m:02d}:  {fmt_eur(v):>16}")
     else:
         print("  (sin aportaciones registradas)")
+    print()
+
+    print(bar)
+    print(f"  CONCENTRACIÓN (% sobre posiciones, alerta a >{CONCENTRATION_THRESHOLD*100:.0f}%)")
+    print(bar)
+    conc = concentration(snapshot)
+    if conc:
+        max_bar = 28
+        for entry in conc:
+            pct = entry["pct"]
+            bar_len = int(round(pct * max_bar / max(c["pct"] for c in conc)))
+            bar_str = "█" * bar_len
+            flag = "  ⚠ alta" if pct >= CONCENTRATION_THRESHOLD else ""
+            title = (entry["title"] or entry["isin"])[:28]
+            print(f"  {title:<28} {pct*100:>6.2f}%  {bar_str}{flag}")
+        top = conc[0]
+        if top["pct"] >= CONCENTRATION_THRESHOLD:
+            print()
+            print(f"  ⚠ Top-1 ({top['title']}) representa {top['pct']*100:.1f}% de la cartera.")
+            print(f"    Considera diversificar si quieres reducir riesgo de concentración.")
     print()
 
     if verbose:
@@ -2089,6 +2331,12 @@ def main():
                    help="Con --insights, añade el bloque POR POSICIÓN para diagnóstico.")
     p.add_argument("--debug-isin", type=str, metavar="ISIN",
                    help="Lista todas las transacciones que el adapter saca para un ISIN concreto. Útil para reconciliar con Excel.")
+    p.add_argument("--backfill-snapshots", action="store_true",
+                   help="Reconstruye snapshots históricos vía TR aggregateHistory y los escribe en `_snapshots`.")
+    p.add_argument("--start", type=str, default=None, metavar="YYYY-MM-DD",
+                   help="Con --backfill-snapshots: fecha de inicio (default: today − 365d).")
+    p.add_argument("--frequency", type=str, default="weekly", choices=["weekly", "biweekly", "monthly"],
+                   help="Con --backfill-snapshots: cadencia (default: weekly).")
     args = p.parse_args()
     since = None
     if args.since:
@@ -2100,6 +2348,8 @@ def main():
             init_sheet(dry_run=args.dry_run)
         elif args.debug_isin:
             debug_isin(args.debug_isin)
+        elif args.backfill_snapshots:
+            backfill_snapshots(start_iso=args.start, frequency=args.frequency)
         elif args.insights:
             sync_insights(verbose=args.verbose)
         elif args.renta:

@@ -51,6 +51,11 @@ class Transaction:
     free shares, referral bonuses). Metric functions accept a `bonus_as` flag
     to decide whether to count these as user contributions or as portfolio
     income.
+
+    `from_cash=True` (default) means the tx actually moved the user's cash
+    balance. Set to False for events where shares appear without the user
+    paying anything (saveback, gifts) — the cash reconstruction code uses this
+    to skip them when walking the cash balance backward in time.
     """
     id: str
     ts: datetime  # tz-aware
@@ -61,6 +66,7 @@ class Transaction:
     isin: Optional[str] = None
     shares: Optional[float] = None
     is_bonus: bool = False
+    from_cash: bool = True
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,10 @@ class Position:
     `cost_basis_eur` is the total amount paid for the shares currently held
     (avg buy price × shares). When None, the broker did not provide it; metrics
     that need cost basis will skip that position.
+
+    `exchange_id` is the broker-internal venue where this position is tracked
+    (e.g. "LSX" for Lang & Schwarz, "BTLX" for Bitstamp-via-L&S). Used by
+    historical price fetchers — without it, you'd guess. None = use broker default.
     """
     isin: str
     title: str
@@ -77,6 +87,7 @@ class Position:
     broker: str
     shares: float = 0.0
     cost_basis_eur: Optional[float] = None
+    exchange_id: Optional[str] = None
 
 
 @dataclass(frozen=True)

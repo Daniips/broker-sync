@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core.metrics import (
+    concentration,
     contribution_vs_average,
     cost_basis_of_current_holdings,
     cost_basis_total,
@@ -225,6 +226,32 @@ class ContributionVsAverageTests(unittest.TestCase):
     def test_returns_none_with_no_history(self):
         txs = [buy(t(2026, 4, 1), 1500)]
         self.assertIsNone(contribution_vs_average(txs, 2026, 4))
+
+
+class ConcentrationTests(unittest.TestCase):
+    def test_orders_desc_by_pct(self):
+        positions = (
+            Position(isin="A", title="A", net_value_eur=2000, broker="t"),
+            Position(isin="B", title="B", net_value_eur=8000, broker="t"),
+        )
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
+        c = concentration(s)
+        self.assertEqual(c[0]["isin"], "B")
+        self.assertAlmostEqual(c[0]["pct"], 0.8)
+        self.assertEqual(c[1]["isin"], "A")
+        self.assertAlmostEqual(c[1]["pct"], 0.2)
+
+    def test_total_scope_includes_cash(self):
+        positions = (Position(isin="A", title="A", net_value_eur=3000, broker="t"),)
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=7000, positions=positions)
+        c_pos = concentration(s, scope="positions")
+        c_tot = concentration(s, scope="total")
+        self.assertAlmostEqual(c_pos[0]["pct"], 1.0)
+        self.assertAlmostEqual(c_tot[0]["pct"], 0.3)
+
+    def test_empty_when_no_positions(self):
+        s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=100, positions=())
+        self.assertEqual(concentration(s), [])
 
 
 class WealthTests(unittest.TestCase):

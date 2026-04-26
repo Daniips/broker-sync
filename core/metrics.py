@@ -204,6 +204,38 @@ def unrealized_return_user_paid(
     }
 
 
+def concentration(
+    snapshot: PortfolioSnapshot,
+    *,
+    scope: Literal["positions", "total"] = "positions",
+) -> list[dict]:
+    """Distribución de valor entre posiciones, ordenada de más a menos peso.
+
+    `scope="positions"`: % sobre el valor de las posiciones (excluye cash).
+    `scope="total"`: % sobre el patrimonio total (cash + posiciones).
+
+    Devuelve [{isin, title, value, pct}, ...] sorted desc por pct.
+    Lista vacía si no hay posiciones (o denominador es 0).
+    """
+    if scope == "total":
+        denom = snapshot.total_eur
+    else:
+        denom = snapshot.positions_value_eur
+    if denom <= 0:
+        return []
+    out = [
+        {
+            "isin": p.isin,
+            "title": p.title,
+            "value": p.net_value_eur,
+            "pct": p.net_value_eur / denom,
+        }
+        for p in snapshot.positions
+    ]
+    out.sort(key=lambda x: -x["pct"])
+    return out
+
+
 def cost_basis_total(snapshot: PortfolioSnapshot) -> Optional[float]:
     """Coste total de adquisición de las posiciones actuales (precio medio × shares).
 
