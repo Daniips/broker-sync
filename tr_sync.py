@@ -145,6 +145,7 @@ INCOME_SHEET = _SHEETS["income"]
 PORTFOLIO_SHEET = _SHEETS["portfolio"]
 STATUS_SHEET = _SHEETS["status"]
 SYNC_STATE_SHEET = _SHEETS["sync_state"]
+SNAPSHOTS_SHEET = _SHEETS.get("snapshots", "_snapshots")
 
 # Año fiscal de la pestaña inversiones (env var > config > año actual)
 INVESTMENTS_SHEET_YEAR = int(
@@ -482,6 +483,79 @@ def append_synced_ids(spreadsheet, new_ids):
         return
     ws = get_or_create_sync_state(spreadsheet)
     ws.append_rows([[x] for x in new_ids], value_input_option="RAW")
+
+
+# ── Snapshots históricos ──────────────────────────────────────────────────
+# Pestaña oculta `_snapshots` con una fila por ejecución de sync/portfolio/
+# insights. Sirve para desbloquear MWR YTD/12m: el valor de las posiciones al
+# inicio del periodo se modela como "deposit sintético" en `core.metrics.mwr`.
+
+_SNAPSHOTS_HEADER = ["ts", "cash_eur", "positions_value_eur", "cost_basis_eur", "total_eur"]
+
+
+def get_or_create_snapshots_sheet(spreadsheet):
+    try:
+        return spreadsheet.worksheet(SNAPSHOTS_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=SNAPSHOTS_SHEET, rows=1000, cols=len(_SNAPSHOTS_HEADER))
+        ws.update(values=[_SNAPSHOTS_HEADER], range_name=f"A1:{chr(ord('A')+len(_SNAPSHOTS_HEADER)-1)}1")
+        spreadsheet.batch_update({"requests": [{
+            "updateSheetProperties": {
+                "properties": {"sheetId": ws.id, "hidden": True},
+                "fields": "hidden",
+            }
+        }]})
+        return ws
+
+
+def append_snapshot_row(spreadsheet, snapshot, cost_basis_total_eur):
+    """Añade una fila a la pestaña `_snapshots` con el estado actual."""
+    from core.metrics import cost_basis_total as _cb_total
+    ws = get_or_create_snapshots_sheet(spreadsheet)
+    cb = cost_basis_total_eur if cost_basis_total_eur is not None else (_cb_total(snapshot) or 0.0)
+    ws.append_rows([[
+        snapshot.ts.isoformat(),
+        round(snapshot.cash_eur, 2),
+        round(snapshot.positions_value_eur, 2),
+        round(cb, 2),
+        round(snapshot.total_eur, 2),
+    ]], value_input_option="RAW")
+
+
+def load_snapshot_history(spreadsheet) -> list[dict]:
+    """Lee todas las filas de `_snapshots` y devuelve dicts ordenados por ts ascendente."""
+    try:
+        ws = spreadsheet.worksheet(SNAPSHOTS_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        return []
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return []
+    out = []
+    for row in rows[1:]:
+        if len(row) < 5 or not row[0]:
+            continue
+        try:
+            ts = datetime.fromisoformat(row[0])
+            out.append({
+                "ts": ts,
+                "cash_eur": float(row[1] or 0),
+                "positions_value_eur": float(row[2] or 0),
+                "cost_basis_eur": float(row[3] or 0),
+                "total_eur": float(row[4] or 0),
+            })
+        except (ValueError, IndexError):
+            continue
+    out.sort(key=lambda x: x["ts"])
+    return out
+
+
+def snapshot_value_at(snapshots: list[dict], target_ts: datetime) -> float | None:
+    """Devuelve positions_value_eur del último snapshot ≤ target_ts. None si no hay."""
+    candidates = [s for s in snapshots if s["ts"] <= target_ts]
+    if not candidates:
+        return None
+    return candidates[-1]["positions_value_eur"]
 
 
 def find_month_columns(worksheet, year, month):
@@ -930,6 +1004,238 @@ def init_sheet(dry_run: bool = False):
         log.info(f"   Pestañas Estado sync y _sync_state se crearán automáticamente al primer sync.")
 
 
+def debug_isin(isin: str):
+    """Imprime todas las transacciones que el adapter saca para un ISIN.
+
+    Útil para reconciliar con tu Excel: ves cada BUY/SELL/DIVIDEND con su
+    fecha, importe y shares, y puedes contrastar qué es lo que TR realmente
+    emite. Si tu Excel tiene un número que no aparece aquí, ese número no
+    está en TR — viene de otra fuente (manual, bonus en cash, etc.).
+    """
+    from brokers.tr.adapter import fetch_transactions
+    from collections import Counter
+
+    log.info("Conectando a Trade Republic...")
+    tr = login()
+    log.info(f"Descargando transacciones (filtrando por ISIN={isin})...")
+    txs = asyncio.run(fetch_transactions(tr, tz=TIMEZONE, gift_overrides=GIFT_COST_OVERRIDES))
+    matches = [t for t in txs if t.isin == isin]
+    log.info(f"   {len(matches)} transacciones para {isin}.\n")
+
+    if not matches:
+        log.warning("No se encontraron transacciones para ese ISIN. Verifica que sea correcto.")
+        return
+
+    # Resumen por kind
+    by_kind = Counter(t.kind.value for t in matches)
+    print(f"Resumen por kind:")
+    for k, n in sorted(by_kind.items()):
+        total = sum(t.amount_eur for t in matches if t.kind.value == k)
+        print(f"  {k:<12} count={n:>4}   suma={total:>12,.2f} €")
+    print()
+
+    # Detalle ordenado
+    print(f"{'fecha':<12} {'kind':<10} {'shares':>10} {'amount':>12} {'bonus':>6}  título")
+    print(f"{'-'*12} {'-'*10} {'-'*10} {'-'*12} {'-'*6}  {'-'*40}")
+    for t in sorted(matches, key=lambda x: x.ts):
+        ts = t.ts.strftime("%Y-%m-%d")
+        sh = f"{t.shares:.6f}" if t.shares is not None else "n/a"
+        bonus = "yes" if t.is_bonus else "no"
+        print(f"{ts:<12} {t.kind.value:<10} {sh:>10} {t.amount_eur:>+12,.2f} {bonus:>6}  {t.title[:50]}")
+    print()
+
+    # Cost basis (FIFO, saveback a 0)
+    from core.metrics import cost_basis_of_current_holdings
+    cb = cost_basis_of_current_holdings(matches, bonus_at_zero_cost=True)
+    cb_full = cost_basis_of_current_holdings(matches, bonus_at_zero_cost=False)
+    print("Cost basis tras FIFO:")
+    print(f"  saveback a 0€:           {cb.get(isin, 0.0):>12,.2f} €")
+    print(f"  saveback a precio merc.: {cb_full.get(isin, 0.0):>12,.2f} €")
+
+
+def sync_insights(verbose: bool = False):
+    """Imprime insights de inversión en consola. No toca la Sheet.
+
+    Bloques (siempre):
+      1. PATRIMONIO ACTUAL: cash + posiciones.
+      2. RENTABILIDAD — POSICIONES ACTUALES: dos lecturas del mismo cost
+         basis: con y sin saveback descontado.
+      3. RENTABILIDAD — HISTÓRICO COMPLETO: MWR all-time anualizado
+         (incluye dividendos cobrados) en dos modos (saveback como income
+         vs como aportación).
+      4. APORTACIONES MENSUALES: este mes vs media de los últimos 12 meses.
+
+    Bloque adicional con `verbose=True`:
+      - POR POSICIÓN: tabla detallada por ISIN para diagnóstico/reconciliar
+        con Excel.
+
+    MWR YTD / 12m se omite: necesita snapshot histórico al inicio del periodo
+    (siguiente iteración).
+    """
+    from brokers.tr.adapter import fetch_snapshot, fetch_transactions
+    from core.metrics import (
+        contribution_vs_average,
+        cost_basis_total as _cb_total,
+        cost_basis_user_paid_per_isin,
+        monthly_contributions,
+        mwr,
+        simple_return,
+        total_invested,
+        unrealized_return,
+        unrealized_return_user_paid,
+    )
+
+    log.info("Conectando a Trade Republic...")
+    tr = login()
+    log.info("Descargando snapshot y transacciones...")
+    snapshot = asyncio.run(fetch_snapshot(tr, tz=TIMEZONE))
+    txs = asyncio.run(fetch_transactions(tr, tz=TIMEZONE, gift_overrides=GIFT_COST_OVERRIDES))
+    log.info(f"   {len(txs)} transacciones, {len(snapshot.positions)} posiciones.")
+
+    # Persiste snapshot + carga histórico para MWR YTD/12m.
+    snapshot_history: list[dict] = []
+    try:
+        spreadsheet = open_spreadsheet()
+        append_snapshot_row(spreadsheet, snapshot, _cb_total(snapshot))
+        snapshot_history = load_snapshot_history(spreadsheet)
+        log.info(f"   snapshot guardado. histórico: {len(snapshot_history)} entradas.\n")
+    except Exception as e:
+        log.warning(f"   ⚠ no se pudo persistir/cargar snapshots ({e}); MWR YTD/12m se omite.\n")
+
+    now = datetime.now(tz=TIMEZONE)
+
+    bar = "═" * 64
+
+    def fmt_pct(x, *, anual=False, sign=True):
+        if x is None:
+            return "n/a"
+        s = f"{x*100:+.2f}" if sign else f"{x*100:.2f}"
+        return f"{s} %" + (" anual" if anual else "")
+
+    def fmt_eur(x):
+        s = f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"{s} €"
+
+    crypto_value = sum(p.net_value_eur for p in snapshot.positions if p.isin in CRYPTO_ISINS)
+    etf_value = snapshot.positions_value_eur - crypto_value
+
+    print(bar)
+    print("  PATRIMONIO ACTUAL")
+    print(bar)
+    if crypto_value > 0:
+        print(f"  Cartera (ETFs/acciones): {fmt_eur(etf_value):>16}")
+        print(f"  Cripto:                  {fmt_eur(crypto_value):>16}")
+    else:
+        print(f"  Posiciones: {fmt_eur(etf_value):>16}")
+    print(f"  Cash:                    {fmt_eur(snapshot.cash_eur):>16}")
+    print(f"  TOTAL:                   {fmt_eur(snapshot.total_eur):>16}")
+    print()
+
+    print(bar)
+    print("  RENTABILIDAD — POSICIONES ACTUALES")
+    print(bar)
+    up = unrealized_return_user_paid(snapshot, txs)
+    ur = unrealized_return(snapshot, txs=txs)
+    if up and ur:
+        print(f"  Cost basis sin saveback:   {fmt_eur(up['cost_basis']):>14}  ← lo que tú pusiste")
+        print(f"  Cost basis con saveback:   {fmt_eur(ur['cost_basis']):>14}  ← averageBuyIn API bruto")
+        print(f"  Valor actual:              {fmt_eur(up['value']):>14}")
+        print(f"  Plusvalía sobre tu dinero: {fmt_eur(up['pnl_eur']):>14}  ({fmt_pct(up['pnl_pct'])})  ← matchea Excel y TR app")
+        print(f"  Plusvalía sobre bruto:     {fmt_eur(ur['pnl_eur']):>14}  ({fmt_pct(ur['pnl_pct'])})  ← saveback incluido como coste")
+        if ur["positions_with_cost"] < ur["positions_total"]:
+            missing = ur["positions_total"] - ur["positions_with_cost"]
+            print(f"  ⚠  {missing} posición(es) sin averageBuyIn; excluida(s).")
+    elif ur:
+        print(f"  Cost basis (con saveback): {fmt_eur(ur['cost_basis']):>14}")
+        print(f"  Valor actual:              {fmt_eur(ur['value']):>14}")
+        print(f"  Plusvalía latente:         {fmt_eur(ur['pnl_eur']):>14}  ({fmt_pct(ur['pnl_pct'])})")
+    else:
+        print("  (sin cost basis disponible — broker no devolvió averageBuyIn)")
+    print()
+
+    print(bar)
+    print("  RENTABILIDAD — HISTÓRICO COMPLETO (incluye ventas y dividendos)")
+    print(bar)
+
+    ytd_start = datetime(now.year, 1, 1, tzinfo=TIMEZONE)
+    twelvem_start = now - timedelta(days=365)
+    ytd_value = snapshot_value_at(snapshot_history, ytd_start) if snapshot_history else None
+    twelvem_value = snapshot_value_at(snapshot_history, twelvem_start) if snapshot_history else None
+
+    for label, mode in (
+        ("Mi dinero (saveback como income — default)", "income"),
+        ("Incluyendo saveback como aportación", "deposit"),
+    ):
+        invested = total_invested(txs, bonus_as=mode)
+        mwr_all = mwr(txs, snapshot, bonus_as=mode)
+        mwr_ytd = mwr(txs, snapshot, bonus_as=mode, start=ytd_start, start_value=ytd_value) if ytd_value else None
+        mwr_12m = mwr(txs, snapshot, bonus_as=mode, start=twelvem_start, start_value=twelvem_value) if twelvem_value else None
+        print(f"  ── {label} ──")
+        print(f"    Aportado neto (BUYs − SELLs):  {fmt_eur(invested):>16}")
+        print(f"    MWR all-time:                  {fmt_pct(mwr_all, anual=True):>16}")
+        print(f"    MWR YTD ({now.year}):                  {fmt_pct(mwr_ytd, anual=True):>16}")
+        print(f"    MWR 12 meses:                  {fmt_pct(mwr_12m, anual=True):>16}")
+        print()
+
+    if not ytd_value and not twelvem_value:
+        print(f"  ℹ MWR YTD / 12m saldrán n/a hasta que haya un snapshot anterior")
+        print(f"    al inicio del periodo. Cada `make insights/sync/portfolio` añade uno.")
+        print()
+
+    print(bar)
+    print("  APORTACIONES MENSUALES (compras brutas, incluye saveback/regalos)")
+    print(bar)
+    monthly = monthly_contributions(txs)
+    cmp = contribution_vs_average(txs, now.year, now.month)
+    if cmp:
+        delta_str = "n/a" if cmp["delta_pct"] is None else f"{cmp['delta_pct']*100:+.1f}%"
+        print(f"  Este mes ({now.year}-{now.month:02d}):       {fmt_eur(cmp['this_month']):>16}")
+        print(f"  Media últimos {cmp['window_months_used']}m:        {fmt_eur(cmp['avg']):>16}")
+        print(f"  Δ vs media:              {delta_str:>16}")
+    elif monthly:
+        last = sorted(monthly.items())[-3:]
+        print("  (sin histórico suficiente para comparar; últimos meses con aportación):")
+        for (y, m), v in last:
+            print(f"    {y}-{m:02d}:  {fmt_eur(v):>16}")
+    else:
+        print("  (sin aportaciones registradas)")
+    print()
+
+    if verbose:
+        print(bar)
+        print("  POR POSICIÓN (--verbose)")
+        print(bar)
+        cb_user_per_isin = cost_basis_user_paid_per_isin(snapshot, txs)
+        label_w = max((len(p.title or "") for p in snapshot.positions), default=10)
+        label_w = min(max(label_w, 12), 28)
+        print(f"  {'Activo':<{label_w}} {'valor':>12} {'cb propio':>12} {'Δ propio':>9} {'cb bruto':>12} {'Δ bruto':>9}")
+        print(f"  {'-'*label_w} {'-'*12} {'-'*12} {'-'*9} {'-'*12} {'-'*9}")
+        sum_value = 0.0
+        sum_cb_user = 0.0
+        sum_cb_tr = 0.0
+        for p in sorted(snapshot.positions, key=lambda x: -x.net_value_eur):
+            cb_user = cb_user_per_isin.get(p.isin)
+            cb_tr = p.cost_basis_eur
+            d_user = (p.net_value_eur - cb_user) / cb_user if cb_user and cb_user > 0 else None
+            d_tr = (p.net_value_eur - cb_tr) / cb_tr if cb_tr and cb_tr > 0 else None
+            title = (p.title or p.isin)[:label_w]
+            cb_user_s = fmt_eur(cb_user) if cb_user else "      n/a"
+            cb_tr_s = fmt_eur(cb_tr) if cb_tr else "      n/a"
+            d_user_s = fmt_pct(d_user) if d_user is not None else "n/a"
+            d_tr_s = fmt_pct(d_tr) if d_tr is not None else "n/a"
+            print(f"  {title:<{label_w}} {fmt_eur(p.net_value_eur):>12} {cb_user_s:>12} {d_user_s:>9} {cb_tr_s:>12} {d_tr_s:>9}")
+            sum_value += p.net_value_eur
+            if cb_user: sum_cb_user += cb_user
+            if cb_tr: sum_cb_tr += cb_tr
+        print(f"  {'-'*label_w} {'-'*12} {'-'*12} {'-'*9} {'-'*12} {'-'*9}")
+        d_user_t = (sum_value - sum_cb_user) / sum_cb_user if sum_cb_user > 0 else None
+        d_tr_t = (sum_value - sum_cb_tr) / sum_cb_tr if sum_cb_tr > 0 else None
+        d_user_total_s = fmt_pct(d_user_t) if d_user_t is not None else 'n/a'
+        d_tr_total_s = fmt_pct(d_tr_t) if d_tr_t is not None else 'n/a'
+        print(f"  {'TOTAL':<{label_w}} {fmt_eur(sum_value):>12} {fmt_eur(sum_cb_user):>12} {d_user_total_s:>9} {fmt_eur(sum_cb_tr):>12} {d_tr_total_s:>9}")
+        print()
+
+
 def sync_portfolio(dry_run: bool):
     """Snapshot del portfolio: escribe los `netValue` actuales en `PORTFOLIO_SHEET!PORTFOLIO_VALUE_RANGE`.
 
@@ -969,6 +1275,16 @@ def sync_portfolio(dry_run: bool):
     worksheet.update(range_name=PORTFOLIO_VALUE_RANGE, values=values, value_input_option="USER_ENTERED")
     log.info(f"\nOK: {len(values) - len(missing)}/{len(values)} celdas escritas en {PORTFOLIO_SHEET}!{PORTFOLIO_VALUE_RANGE}")
     write_status(spreadsheet, "portfolio")
+
+    # Persiste snapshot completo (cash + posiciones) para histórico de MWR.
+    try:
+        from brokers.tr.adapter import fetch_snapshot
+        from core.metrics import cost_basis_total as _cb_total
+        snap = asyncio.run(fetch_snapshot(tr, tz=TIMEZONE))
+        append_snapshot_row(spreadsheet, snap, _cb_total(snap))
+        log.info(f"   snapshot guardado en `{SNAPSHOTS_SHEET}` (oculto).")
+    except Exception as e:
+        log.warning(f"   ⚠ no se pudo guardar snapshot ({e})")
 
 
 def sync(dry_run: bool, since: datetime | None, init_mode: bool):
@@ -1767,6 +2083,12 @@ def main():
                    help="Crea las pestañas que faltan en tu Google Sheet con la estructura mínima.")
     p.add_argument("--doctor", action="store_true",
                    help="Verifica que el setup está listo: config, OAuth, Sheet, pestañas, sesión pytr.")
+    p.add_argument("--insights", action="store_true",
+                   help="Imprime patrimonio, aportaciones y rentabilidad (simple + MWR) en consola. No toca la Sheet.")
+    p.add_argument("--verbose", action="store_true",
+                   help="Con --insights, añade el bloque POR POSICIÓN para diagnóstico.")
+    p.add_argument("--debug-isin", type=str, metavar="ISIN",
+                   help="Lista todas las transacciones que el adapter saca para un ISIN concreto. Útil para reconciliar con Excel.")
     args = p.parse_args()
     since = None
     if args.since:
@@ -1776,6 +2098,10 @@ def main():
             sys.exit(doctor())
         elif args.init_sheet:
             init_sheet(dry_run=args.dry_run)
+        elif args.debug_isin:
+            debug_isin(args.debug_isin)
+        elif args.insights:
+            sync_insights(verbose=args.verbose)
         elif args.renta:
             year = args.year or (datetime.now(tz=TIMEZONE).year - 1)
             sync_renta(year, dry_run=args.dry_run)

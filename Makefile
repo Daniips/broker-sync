@@ -9,7 +9,7 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 PYTR := $(VENV)/bin/pytr
 
-.PHONY: help setup login init-sheet doctor sync portfolio verify inspect test renta config all refresh-cookie upload-secret clear-cache
+.PHONY: help setup login init-sheet doctor sync portfolio verify inspect test renta insights config all refresh-cookie upload-secret clear-cache
 
 help:
 	@echo "Setup:"
@@ -33,6 +33,7 @@ help:
 	@echo "  make verify           portfolio dry-run local (no escribe en la Sheet)"
 	@echo "  make renta            informe IRPF del año pasado"
 	@echo "  make renta YEAR=2025  informe IRPF de un año concreto"
+	@echo "  make insights         patrimonio + rentabilidad (simple + MWR) en consola"
 	@echo "  make inspect          inspecciona eventos brutos de TR (debug)"
 	@echo "  make test             ejecuta tests unitarios"
 	@echo ""
@@ -89,6 +90,9 @@ test:
 
 renta:
 	$(PYTHON) tr_sync.py --renta $(if $(YEAR),--year $(YEAR))
+
+insights:
+	$(PYTHON) tr_sync.py --insights
 
 # ── Targets opcionales para GitHub Actions ────────────────────────────────
 # Requieren `gh` CLI autenticado y la variable REPO=tu_usuario/tu_repo.
