@@ -396,6 +396,14 @@ async def fetch_tr_portfolio(tr):
     return p.portfolio
 
 
+async def fetch_tr_portfolio_and_cash(tr):
+    """Devuelve (portfolio_positions, cash_list). Reutiliza el loop de pytr Portfolio."""
+    _patch_compact_portfolio_with_sec_acc_no(tr)
+    p = Portfolio(tr, include_watchlist=False, lang="es", output=None)
+    await p.portfolio_loop()
+    return p.portfolio, (p.cash or [])
+
+
 async def fetch_tr_events(tr, not_before_ts: float = 0.0):
     """Descarga eventos brutos de la timeline de TR a partir de `not_before_ts` (epoch).
 
