@@ -38,7 +38,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
       frequency: "weekly" | "monthly" | "biweekly". Default "weekly".
     """
     if not is_feature_enabled("backfill_snapshots"):
-        log.info("Feature 'backfill_snapshots' deshabilitada (config o broker).")
+        log.info("Feature 'backfill_snapshots' disabled (config or broker).")
         return
 
     from brokers.tr.adapter import fetch_price_history_with_fallback, fetch_snapshot, fetch_transactions, price_at
@@ -61,7 +61,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
     elif frequency == "monthly":
         delta = timedelta(days=30)
     else:
-        raise ValueError(f"frequency desconocida: {frequency!r}. Usa weekly|biweekly|monthly.")
+        raise ValueError(f"unknown frequency: {frequency!r}. Use weekly|biweekly|monthly.")
 
     dates = []
     d = start
@@ -69,7 +69,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
         dates.append(d)
         d += delta
     if not dates:
-        log.error(f"No hay fechas a reconstruir entre {start.date()} y {today_noon.date()} con cadencia {frequency}.")
+        log.error(f"No dates to reconstruct between {start.date()} and {today_noon.date()} with cadence {frequency}.")
         return
 
     # Pick the longest range we need given the start date.
@@ -84,7 +84,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
     # fetches (those need an active connection). Still saves ~10s.
     cached = None if refresh else load_cached_session(CACHE_PATH)
 
-    log.info("Conectando a Trade Republic...")
+    log.info("Connecting to Trade Republic...")
     tr = login()
 
     # IMPORTANT: every async call must live in a single event loop because
@@ -92,14 +92,14 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
     async def _gather():
         if cached:
             snap, txs_local, _bench = cached  # benchmarks not needed for backfill
-            log.info(f"   ⚡ snapshot+txs desde cache ({len(txs_local)} txs, {len(snap.positions)} posiciones)\n")
+            log.info(f"   ⚡ snapshot+txs from cache ({len(txs_local)} txs, {len(snap.positions)} positions)\n")
         else:
-            log.info("Descargando snapshot actual y transacciones...")
+            log.info("Downloading current snapshot and transactions...")
             snap = await fetch_snapshot(tr, tz=tz)
             txs_local = await fetch_transactions(tr, tz=tz, gift_overrides=GIFT_COST_OVERRIDES)
-            log.info(f"   {len(txs_local)} transacciones, {len(snap.positions)} posiciones.\n")
+            log.info(f"   {len(txs_local)} transactions, {len(snap.positions)} positions.\n")
 
-        log.info(f"Descargando histórico de precios (range={range_str}) para {len(snap.positions)} ISINs...")
+        log.info(f"Downloading price history (range={range_str}) for {len(snap.positions)} ISINs...")
         # Build the list of exchanges to try per ISIN.
         # - The one TR returns in compactPortfolio (if any) → first.
         # - Then LSX (default for stocks/ETFs).
@@ -123,7 +123,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
                 debug=(i == 0),
             )
             prices[p.isin] = history
-            status = f"{len(history)} barras (.{used})" if history else f"n/a (probé {','.join(exchanges)})"
+            status = f"{len(history)} bars (.{used})" if history else f"n/a (tried {','.join(exchanges)})"
             log.info(f"   {(p.title or p.isin)[:36]:<36}  {status}")
         return snap, txs_local, prices
 
@@ -134,11 +134,11 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
         save_cached_session(CACHE_PATH, snapshot, txs)
 
     if not any(price_history.values()):
-        log.error("\nNinguna posición devolvió histórico de precios. Backfill abortado.")
-        log.error("Posibles causas: aggregateHistory no disponible para ningún ISIN, problema de exchange.")
+        log.error("\nNo position returned a price history. Backfill aborted.")
+        log.error("Possible causes: aggregateHistory unavailable for any ISIN, exchange issue.")
         return
 
-    log.info(f"\nReconstruyendo {len(dates)} snapshots ({frequency})...")
+    log.info(f"\nReconstructing {len(dates)} snapshots ({frequency})...")
     records: list[tuple] = []
     for d in dates:
         prices = {}
@@ -148,7 +148,7 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
                 prices[isin] = p
         snap = reconstruct_snapshot_at(d, snapshot, txs, prices)
         if not snap.positions and snap.cash_eur == snapshot.cash_eur:
-            log.info(f"   {d.date()}  sin actividad — skip")
+            log.info(f"   {d.date()}  no activity — skip")
             continue
         records.append((snap, None))
         log.info(
@@ -157,15 +157,15 @@ def backfill_snapshots(start_iso: str | None = None, frequency: str = "weekly", 
             f"({len(snap.positions)} pos)"
         )
 
-    log.info(f"\nEscribiendo {len(records)} snapshots a `{SNAPSHOTS_SHEET}` (en batch, dedup activado)...")
+    log.info(f"\nWriting {len(records)} snapshots to `{SNAPSHOTS_SHEET}` (batched, dedup enabled)...")
     spreadsheet = open_spreadsheet()
     store = _make_snapshot_store(spreadsheet)
     try:
         written = store.append_batch(records, skip_existing=True)
         skipped = len(records) - written
-        log.info(f"OK: {written} nuevos snapshots escritos, {skipped} ya existían (dedup por ts).")
+        log.info(f"OK: {written} new snapshots written, {skipped} already existed (dedup by ts).")
         if written > 0:
-            log.info(f"   Próximo `make insights` ya tendrá MWR YTD/12m si hay snapshots anteriores al periodo.")
+            log.info(f"   Next `make insights` will have MWR YTD/12m if there are snapshots before the period.")
     except Exception as e:
-        log.error(f"⚠ Falló la escritura batch: {e}")
-        log.error(f"   Si es rate limit, espera 1-2 minutos y vuelve a ejecutar — el dedup omitirá los ya escritos.")
+        log.error(f"⚠ Batch write failed: {e}")
+        log.error(f"   If it's a rate limit, wait 1-2 minutes and rerun — dedup will skip the already-written ones.")

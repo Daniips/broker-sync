@@ -1,26 +1,24 @@
-# Guía de `make insights`
+# Guide to `make insights`
 
-Esta guía explica **bloque a bloque** lo que sale al ejecutar `make insights`, por qué hay varias lecturas de la misma idea, y qué pregunta responde cada número.
-
-> 🇪🇸 Doc en español, igual que `CONFIG.md`, `RENTA.md` y `SHEET_TEMPLATE.md`.
+This guide explains **block by block** what comes out of `make insights`, why there are several readings of the same idea, and what question each number answers.
 
 ---
 
-## TL;DR — qué número mirar
+## TL;DR — which number to look at
 
-| Pregunta | Número que responde |
+| Question | Number that answers it |
 |---|---|
-| ¿Cuánto tengo en total? | **Patrimonio → TOTAL** |
-| ¿Cómo van mis posiciones vivas? | **Plusvalía sobre tu dinero (%)** ← matchea TR app y Excel |
-| ¿Qué rentabilidad real anualizada saca mi inversión? | **MWR all-time / 12 meses** |
-| ¿Estoy ahorrando más o menos que de costumbre? | **Aportaciones mensuales: Δ vs media** |
-| ¿Estoy demasiado concentrado en una posición? | **Concentración + alerta `⚠ alta`** |
+| How much do I have in total? | **Patrimonio → TOTAL** |
+| How are my live positions doing? | **Plusvalía sobre tu dinero (%)** ← matches TR app and Excel |
+| What real annualized return is my investment generating? | **MWR all-time / 12 months** |
+| Am I saving more or less than usual? | **Monthly contributions: Δ vs average** |
+| Am I too concentrated in one position? | **Concentration + `⚠ alta` alert** |
 
-El resto de líneas son contexto / sub-lecturas para entender de dónde sale cada cifra.
+The rest of the lines are context / sub-readings to help you understand where each figure comes from.
 
 ---
 
-## Bloque 1 — PATRIMONIO ACTUAL
+## Block 1 — CURRENT NET WORTH
 
 ```
 PATRIMONIO ACTUAL
@@ -30,16 +28,16 @@ PATRIMONIO ACTUAL
   TOTAL:                        22.551,24 €
 ```
 
-- **Cartera (ETFs/acciones)** = suma del `netValue` de las posiciones que **no** están en `crypto_isins` del config.
-- **Cripto** = suma del `netValue` de las posiciones marcadas como cripto.
-- **Cash** = saldo EUR de tu cuenta TR.
-- **TOTAL** = todo lo anterior.
+- **Cartera (ETFs/acciones)** = sum of `netValue` of positions that are **not** in `crypto_isins` of the config.
+- **Cripto** = sum of `netValue` of positions marked as crypto.
+- **Cash** = EUR balance of your TR account.
+- **TOTAL** = everything above.
 
-Separamos cartera y cripto porque la app de TR las muestra en bloques distintos. Sumadas dan lo mismo que el balance total que ves en TR (modulo ±€ por movimientos de precio entre cuando miras y cuando corre el script).
+We separate portfolio and crypto because the TR app shows them in distinct blocks. Their sum equals the total balance you see in TR (give or take a few € from price moves between when you look and when the script runs).
 
 ---
 
-## Bloque 2 — RENTABILIDAD — POSICIONES ACTUALES
+## Block 2 — RETURNS — CURRENT POSITIONS
 
 ```
 RENTABILIDAD — POSICIONES ACTUALES
@@ -50,38 +48,38 @@ RENTABILIDAD — POSICIONES ACTUALES
   Plusvalía sobre bruto:           999,58 €  (+11,87 %)  ← saveback incluido como coste
 ```
 
-Aquí mostramos **dos lecturas** de la misma plusvalía latente, según qué cost basis uses como denominador.
+Here we show **two readings** of the same unrealized gain, depending on which cost basis you use as the denominator.
 
-### Cost basis sin saveback (recomendado)
+### Cost basis without saveback (recommended)
 
-Es lo que TÚ has metido de tu bolsillo en las posiciones que tienes ahora vivas:
+It's what YOU put out of pocket into the positions you currently hold:
 
 ```
-cost_basis_propio = TR averageBuyIn × shares − Σ saveback recibido del ISIN
+own_cost_basis = TR averageBuyIn × shares − Σ saveback received from the ISIN
 ```
 
-El saveback es dinero que TR te regala (~1% del gasto con tarjeta) que entra a la cartera como acciones. **No lo pagaste tú**, así que no debería inflar el coste que usas para medir tu rendimiento.
+Saveback is money TR gives you (~1% of card spend) that enters your portfolio as shares. **You didn't pay it**, so it shouldn't inflate the cost you use to measure your return.
 
-Esta lectura **matchea**:
-- El % "Ganancia" que llevas en tu Excel manual (si lo tienes).
-- El % "Rendimiento" que muestra la app de TR.
+This reading **matches**:
+- The "Ganancia" % you have in your manual Excel (if you keep one).
+- The "Rendimiento" % the TR app shows.
 
-### Cost basis con saveback (TR API bruto)
+### Cost basis with saveback (TR API gross)
 
-Es directamente `averageBuyIn × shares` que devuelve TR. Incluye el valor de las shares saveback al precio de mercado en el momento de entrega. Es el "cost basis técnico" — lo que el broker considera que pagaste, sin distinguir si fue tu dinero o un perk.
+It's directly `averageBuyIn × shares` returned by TR. It includes the value of the saveback shares at the market price at delivery time. It's the "technical cost basis" — what the broker considers you paid, without distinguishing whether it was your money or a perk.
 
-### ¿Cuál de los dos es "el bueno"?
+### Which of the two is "the right one"?
 
-Depende de la pregunta:
+It depends on the question:
 
-- "**¿Cómo va el dinero que YO puse?**" → sin saveback (+14,51 %).
-- "**¿Cuánto vale la cartera vs lo que costó adquirirla?**" → con saveback (+11,87 %).
+- "**How is the money I put in doing?**" → without saveback (+14.51%).
+- "**How much is the portfolio worth vs the cost of acquiring it?**" → with saveback (+11.87%).
 
-Mostramos los dos para que entiendas la diferencia. La diferencia entre ambos % te dice **cuánto te está aportando el saveback**: aquí ~2,6 puntos porcentuales de boost gratis.
+We show both so you understand the difference. The gap between the two %s tells you **how much saveback is contributing**: here ~2.6 percentage points of free boost.
 
 ---
 
-## Bloque 3 — RENTABILIDAD — HISTÓRICO COMPLETO
+## Block 3 — RETURNS — FULL HISTORY
 
 ```
 RENTABILIDAD — HISTÓRICO COMPLETO (incluye ventas y dividendos)
@@ -98,55 +96,55 @@ RENTABILIDAD — HISTÓRICO COMPLETO (incluye ventas y dividendos)
     MWR 12 meses:                    +22,72 % anual
 ```
 
-Aquí cambiamos el ángulo: en vez de "valor vs coste de la cartera viva", calculamos **MWR (XIRR)** sobre todos los flujos históricos. Ventas, dividendos, intereses, regalos — todo entra.
+Here we change the angle: instead of "value vs cost of the live portfolio", we compute **MWR (XIRR)** over all historical flows. Sales, dividends, interest, gifts — everything is in.
 
-### Qué es MWR
+### What MWR is
 
-**Money-Weighted Return** = la TIR anualizada sobre tus flujos de dinero. Responde a la pregunta:
+**Money-Weighted Return** = the annualized IRR over your cash flows. It answers:
 
-> "Si pongo en una hoja de cálculo cada euro que metí (con su fecha) y cada euro que saqué (idem) y al final el valor actual de la cartera, ¿a qué tasa anual tendrían que crecer mis euros para que cuadre?"
+> "If I put in a spreadsheet every euro I deposited (with its date) and every euro I withdrew (idem) and at the end the current value of the portfolio, at what annual rate would my euros need to grow for the math to check out?"
 
-Es el número honesto y comparable contra benchmarks (S&P, MSCI World). El % simple ("metí 9.942, vale 9.423, perdí un 5%") es engañoso porque ignora **cuándo** entró cada euro: el dinero que metiste hace 18 meses ha tenido más tiempo de compoundear que el que metiste el mes pasado.
+It's the honest number, comparable against benchmarks (S&P, MSCI World). The simple % ("I put in 9,942, it's worth 9,423, I lost 5%") is misleading because it ignores **when** each euro entered: money you put in 18 months ago has had more time to compound than money you put in last month.
 
-### Por qué dos modos: income vs deposit
+### Why two modes: income vs deposit
 
-Cuando recibes saveback, hay dos formas de tratarlo en el cálculo:
+When you receive saveback, there are two ways to treat it in the calculation:
 
-- **`income` (default)**: el saveback es "ingreso del bróker", como un bonus. **No** cuenta como aportación tuya. El MWR ignora estas shares como flujo externo y lo que aportaron sube el rendimiento → MWR más alto.
-- **`deposit`**: tratamos el saveback como una aportación más de tu bolsillo. Cuenta como capital invertido sin aportar rendimiento extra → MWR más bajo (más capital, mismo retorno).
+- **`income` (default)**: saveback is "broker income", like a bonus. It does **not** count as your contribution. The MWR ignores these shares as an external flow and what they brought in lifts the return → higher MWR.
+- **`deposit`**: we treat saveback as another contribution from your pocket. It counts as invested capital without bringing extra return → lower MWR (more capital, same return).
 
 ```
-MWR all-time income:    +23,08 %  ← respuesta a "¿qué rinde MI esfuerzo de ahorro?"
-MWR all-time deposit:   +19,66 %  ← respuesta a "¿qué rinde cualquier euro invertido?"
+MWR all-time income:    +23,08 %  ← answers "what is MY savings effort returning?"
+MWR all-time deposit:   +19,66 %  ← answers "what does any invested euro return?"
 ```
 
-Ambos son matemáticamente correctos. La diferencia entre los dos te dice cuánto te está empujando el saveback.
+Both are mathematically correct. The difference between the two tells you how much saveback is pushing.
 
-### Por qué 3 horizontes (all-time / YTD / 12m)
+### Why 3 horizons (all-time / YTD / 12m)
 
-| Horizonte | Qué responde |
+| Horizon | What it answers |
 |---|---|
-| **all-time** | Rentabilidad anualizada desde el primer día de tu cuenta. Estable pero arrastra contexto antiguo. |
-| **YTD** | Rentabilidad anualizada desde 1 enero del año actual. **Comparable** con "el S&P lleva +X% YTD". |
-| **12 meses** | Rentabilidad anualizada de los últimos 365 días. Mejor para "cómo va mi cartera **últimamente**" porque suaviza efectos puntuales del año natural. |
+| **all-time** | Annualized return since the first day of your account. Stable but drags old context. |
+| **YTD** | Annualized return since January 1st of the current year. **Comparable** to "the S&P is up +X% YTD". |
+| **12 months** | Annualized return over the last 365 days. Better for "how is my portfolio doing **lately**" because it smooths year-boundary effects. |
 
-Los tres se calculan con XIRR pero sobre periodos distintos. Para los sub-periodos (YTD / 12m) necesitamos el **valor de la cartera al inicio** del periodo, que se saca de la pestaña oculta `_snapshots`. Si aún no tienes snapshots anteriores al periodo, sale `n/a` con una nota.
+All three are computed with XIRR but over different periods. For the sub-periods (YTD / 12m) we need the **portfolio value at the start** of the period, which comes from the hidden `_snapshots` tab. If you don't yet have snapshots before the period, it shows `n/a` with a note.
 
-> **Truco:** ejecuta `make backfill-snapshots` una vez para que reconstruya un año de histórico semanal y los MWR YTD/12m salgan desde el primer día.
+> **Tip:** run `make backfill-snapshots` once to reconstruct a year of weekly history so YTD/12m MWRs come out from day one.
 
-### Aportado neto vs valor
+### Net contributed vs value
 
 ```
 Aportado neto (BUYs − SELLs):        9.942,22 €
 ```
 
-Es la suma de todas tus compras menos el dinero que recuperaste por ventas, todo histórico. **No es** el cost basis de tus posiciones actuales (esto sería FIFO sobre las shares vivas). Útil como "este es el dinero neto que sigue dentro de la cartera o que circuló por ella".
+It's the sum of all your purchases minus the money recovered through sales, all-time. It's **not** the cost basis of your current positions (that would be FIFO over the live shares). Useful as "this is the net money still inside the portfolio or that flowed through it".
 
 ---
 
-## Bloque — ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN
+## Block — PERFORMANCE ATTRIBUTION PER POSITION
 
-Tabla con el MWR individual de cada posición que tienes ahora viva, y cuántos puntos porcentuales aporta al rendimiento ponderado de tu cartera:
+Table with the individual MWR of each position you currently hold, and how many percentage points it contributes to the weighted return of your portfolio:
 
 ```
 ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN (MWR per-ISIN, modo income)
@@ -160,20 +158,20 @@ ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN (MWR per-ISIN, modo income)
   TOTAL contribuciones                                        +XX.XX pp
 ```
 
-**Cómo leerlo:**
-- **valor** y **peso**: cuánto pesa esa posición en tu cartera de inversión actual.
-- **MWR pos.**: rentabilidad anualizada de esa posición individual, calculada con XIRR sobre todos sus flujos (BUYs, SELLs parciales, dividendos, valor actual). Honesta, no es un % "desde mi precio medio".
-- **aporta**: contribución de esa posición al rendimiento agregado = `MWR × peso`. Sumando todas → rentabilidad anualizada **de las posiciones vivas**.
+**How to read it:**
+- **valor** and **peso**: how much the position weighs in your current investment portfolio.
+- **MWR pos.**: annualized return of that individual position, computed with XIRR over all its flows (BUYs, partial SELLs, dividends, current value). Honest, not a "% from my average price".
+- **aporta**: contribution of that position to the aggregate return = `MWR × weight`. Summing all → annualized return **of live positions**.
 
-**Importante:** La suma de contribuciones **no coincide** con tu MWR all-time del bloque histórico. Razón: aquí solo cuentan posiciones vivas; el MWR all-time también incluye los flujos de posiciones que ya vendiste (NVIDIA, Tesla, Apple, etc.).
+**Important:** The sum of contributions **doesn't match** your all-time MWR from the historical block. Reason: only live positions count here; the all-time MWR also includes flows from positions you already sold (NVIDIA, Tesla, Apple, etc.).
 
-**Cuándo te ayuda:** ver de un vistazo qué posiciones llevan el peso del rendimiento y cuáles arrastran. Si una posición pequeña tiene MWR catastrófico (Solana -42%), probablemente no merece la pena darle más peso. Si una grande va lenta pero estable (Europe +12%), sabes que aporta poco pero diversifica.
+**When it helps:** see at a glance which positions drive the return and which drag. If a small position has catastrophic MWR (Solana -42%), it probably doesn't deserve more weight. If a large one is slow but steady (Europe +12%), you know it contributes little but diversifies.
 
 ---
 
-## Bloque opcional — RENTABILIDAD VS BENCHMARK
+## Optional block — RETURN VS BENCHMARK
 
-Solo aparece si tienes `benchmark_isin` definido en `config.yaml`. Compara tu MWR (modo `income`) contra el rendimiento anualizado de un ETF de referencia en los mismos periodos:
+Only appears if you have `benchmark_isin` defined in `config.yaml`. Compares your MWR (`income` mode) against the annualized return of a reference ETF over the same periods:
 
 ```
 RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
@@ -183,15 +181,15 @@ RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
   12 meses              +25.17 %         +18.90 %          +6.27 pp ✓
 ```
 
-- **`✓`** aparece cuando bates al benchmark en ese periodo.
-- **Δ positivo en pp** (puntos porcentuales): bates al índice por X pp.
-- **Δ negativo**: estás por debajo. No es necesariamente malo — depende de tu estrategia (más conservador, más diversificado, etc.).
+- **`✓`** appears when you beat the benchmark in that period.
+- **Positive Δ in pp** (percentage points): you beat the index by X pp.
+- **Negative Δ**: you're below. Not necessarily bad — depends on your strategy (more conservative, more diversified, etc.).
 
-Sin esta línea, "+23%" anual no te dice si vas bien o mal. Con benchmark sí: si el S&P hizo +18% en el mismo periodo y tú haces +23%, has aportado +5pp de "alpha" sobre el mercado. Si hubiera hecho +30% y tú haces +23%, te falta -7pp — quizá estás demasiado en cash o mal diversificado.
+Without this line, "+23%" annual doesn't tell you whether you're doing well. With benchmark it does: if the S&P returned +18% in the same period and you do +23%, you've added +5pp of "alpha" over the market. If it had done +30% and you do +23%, you're missing -7pp — maybe you're holding too much cash or poorly diversified.
 
 ---
 
-## Bloque 4 — APORTACIONES MENSUALES
+## Block 4 — MONTHLY CONTRIBUTIONS
 
 ```
 APORTACIONES MENSUALES (compras brutas, incluye saveback/regalos)
@@ -200,23 +198,23 @@ APORTACIONES MENSUALES (compras brutas, incluye saveback/regalos)
   Δ vs media:                        +81.3%
 ```
 
-- **Este mes** = suma de todas las BUYs del mes en curso (savings plan + manuales + saveback + regalos). Matchea la pestaña "Dinero invertido YYYY" de tu Sheet.
-- **Media últimos 12m** = media simple de los meses con BUYs > 0 en los últimos 12 (no diluye con meses sin actividad).
-- **Δ vs media** = `(este_mes − media) / media`. Positivo = este mes inviertes más de lo habitual.
+- **Este mes** = sum of all BUYs in the current month (savings plan + manual + saveback + gifts). Matches the "Dinero invertido YYYY" tab in your Sheet.
+- **Media últimos 12m** = simple average of the months with BUYs > 0 in the last 12 (it doesn't dilute with months without activity).
+- **Δ vs media** = `(this_month − average) / average`. Positive = this month you invest more than usual.
 
-Si no hay histórico suficiente para comparar (cuenta nueva), muestra los últimos 3 meses con aportación.
+If there's not enough history to compare (new account), it shows the last 3 months with contribution.
 
-> **Por qué incluye saveback/regalos**: para matchear tu Excel manual. Si quieres "solo MI dinero del mes", calcula a mano: `915,64 − saveback_de_abril`.
+> **Why include saveback/gifts**: to match your manual Excel. If you want "only MY money this month", calculate by hand: `915.64 − saveback_april`.
 
 ---
 
-## Bloque 5 — CONCENTRACIÓN
+## Block 5 — CONCENTRATION
 
-Distribución del valor de tus posiciones (excluye cash) por activo, ordenada de más a menos peso. Las barras son visuales — mismo ratio que el % numérico.
+Distribution of your positions' value (excludes cash) by asset, sorted from heaviest to lightest. The bars are visual — same ratio as the numeric %.
 
-### Modo simple (sin límites por activo)
+### Simple mode (no per-asset limits)
 
-Si no defines `concentration_limits` en config, todos los activos se comparan contra el `concentration_threshold` global (default 35%):
+If you don't define `concentration_limits` in config, all assets are compared against the global `concentration_threshold` (default 35%):
 
 ```
 CONCENTRACIÓN (% sobre posiciones, alerta a >35%)
@@ -226,14 +224,14 @@ CONCENTRACIÓN (% sobre posiciones, alerta a >35%)
   ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
-### Modo per-asset (con límites individuales)
+### Per-asset mode (with individual limits)
 
-Si defines `concentration_limits` en `config.yaml`, cada ISIN se evalúa contra su propio máximo. Útil cuando tienes tolerancias razonables distintas por activo (core ETFs altas, cripto bajas):
+If you define `concentration_limits` in `config.yaml`, each ISIN is evaluated against its own cap. Useful when you have reasonable per-asset tolerances (high for core ETFs, low for crypto):
 
 ```yaml
 concentration_limits:
-  IE00B5BMR087: 0.50    # SP500 — core, tolerancia alta
-  XF000SOL0012: 0.08    # Solana — cripto, tolerancia baja
+  IE00B5BMR087: 0.50    # SP500 — core, high tolerance
+  XF000SOL0012: 0.08    # Solana — crypto, low tolerance
 ```
 
 Output:
@@ -248,9 +246,9 @@ CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
   ✓ Todas las posiciones dentro de su límite.
 ```
 
-### Modo "solo me importan X activos"
+### "I only care about X assets" mode
 
-Caso típico: solo quieres alerta para Solana (o cualquier cripto), los demás te dan igual. Pon `concentration_threshold: null` y solo los ISINs con entrada en `concentration_limits` llevarán línea de alerta:
+Typical case: you only want an alert for Solana (or any crypto), the rest don't matter. Set `concentration_threshold: null` and only the ISINs with an entry in `concentration_limits` will show an alert line:
 
 ```yaml
 concentration_threshold: null
@@ -273,26 +271,26 @@ CONCENTRACIÓN (% sobre posiciones, alerta solo en activos con límite explícit
   ✓ Todas las posiciones dentro de su límite.
 ```
 
-Solo Solana muestra línea de límite. Los demás van "limpios" sin alertas posibles.
+Only Solana shows a limit line. The rest go "clean" with no possible alerts.
 
-### Cuándo se muestra "(global)"
+### When "(global)" is shown
 
-Indica que ese activo **no tiene entrada** en `concentration_limits` y se está comparando contra el `concentration_threshold` global. Útil para detectar si te has olvidado de añadir un límite a alguna posición.
+Indicates that the asset **has no entry** in `concentration_limits` and is being compared against the global `concentration_threshold`. Useful to detect if you forgot to add a limit to some position.
 
-### Significado de las alertas
+### Meaning of the alerts
 
-- **EXCEDIDO en X pp**: la posición está por encima de su límite. Margen negativo en el ratio.
-- **margen +X pp**: la posición está por debajo del límite con X puntos porcentuales de holgura.
-- **✓ Todas dentro de su límite** (al final): nada que rebalancear.
-- **⚠ N posiciones por encima**: cuántas activos te has pasado.
+- **EXCEDIDO en X pp**: the position is above its limit. Negative margin in the ratio.
+- **margen +X pp**: the position is below the limit with X percentage points of headroom.
+- **✓ Todas dentro de su límite** (at the end): nothing to rebalance.
+- **⚠ N posiciones por encima**: how many assets you're over.
 
-No es una recomendación de cambiar nada — es una señal de que **mires** si esa concentración te resulta cómoda. Una cartera 100% S&P 500 está perfectamente concentrada y muchos lo prefieren así.
+It's not a recommendation to change anything — it's a signal to **check** whether that concentration is comfortable for you. A 100% S&P 500 portfolio is perfectly concentrated and many prefer it that way.
 
 ---
 
-## Bloque opcional — EXPOSICIÓN POR DIVISA
+## Optional block — CURRENCY EXPOSURE
 
-Solo aparece si tienes `asset_currencies` definido en `config.yaml`. Muestra cómo se reparte tu patrimonio total (posiciones + cash) por divisa de denominación:
+Only appears if you have `asset_currencies` defined in `config.yaml`. Shows how your total net worth (positions + cash) is split by denomination currency:
 
 ```
 EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
@@ -301,93 +299,93 @@ EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
   CRYPTO        278,28 €  (  1.2%)  ▌                        1 pos.
 ```
 
-Cuándo te ayuda: si la mayoría de tus inversiones son ETFs USD-denominados pero tu cash sigue en EUR, te das cuenta de que tu **exposición efectiva a USD** es menor de lo que parece — el cash sin invertir está pesando hacia EUR.
+When it helps: if most of your investments are USD-denominated ETFs but your cash stays in EUR, you realize that your **effective USD exposure** is lower than it seems — uninvested cash is weighing towards EUR.
 
-ISINs no mapeados van al bucket `UNKNOWN` con un aviso. Para mapearlos, edita `config.yaml > asset_currencies`.
+Unmapped ISINs go to the `UNKNOWN` bucket with a warning. To map them, edit `config.yaml > asset_currencies`.
 
 ---
 
-## Bloque opcional — POR POSICIÓN (`--verbose`)
+## Optional block — PER POSITION (`--verbose`)
 
 ```
 $ python tr_sync.py --insights --verbose
 ```
 
-Activa una tabla por activo con cost basis propio + bruto y plusvalía en cada métrica. Solo para diagnóstico — útil si ves un número raro en los bloques anteriores y quieres ver qué posición lo explica.
+Activates a per-asset table with own + gross cost basis and unrealized gain on each metric. Diagnostic only — useful if you see a weird number in the previous blocks and want to see which position explains it.
 
 ---
 
-## Cómo se acumula el histórico (`_snapshots`)
+## How history is accumulated (`_snapshots`)
 
-Cada `make insights`, `make portfolio` y `make backfill-snapshots` añaden una fila a la pestaña oculta `_snapshots`:
+Each `make insights`, `make portfolio`, and `make backfill-snapshots` adds a row to the hidden `_snapshots` tab:
 
-| Columna | Contenido |
+| Column | Content |
 |---|---|
-| `ts` | Timestamp ISO |
-| `cash_eur` | Cash en TR |
-| `positions_value_eur` | Valor de todas las posiciones |
-| `cost_basis_eur` | TR cost basis con saveback (si aplica) |
-| `total_eur` | Cash + posiciones |
+| `ts` | ISO timestamp |
+| `cash_eur` | Cash in TR |
+| `positions_value_eur` | Value of all positions |
+| `cost_basis_eur` | TR cost basis with saveback (when applicable) |
+| `total_eur` | Cash + positions |
 
-La pestaña `_snapshots_positions` añade una fila por (snapshot, ISIN) con shares y net_value. Útil para gráficas de evolución por activo.
+The `_snapshots_positions` tab adds a row per (snapshot, ISIN) with shares and net_value. Useful for per-asset evolution charts.
 
-Ambas pestañas están **ocultas** por defecto. Para verlas en Google Sheets: menú `Ver → Pestañas ocultas`.
+Both tabs are **hidden** by default. To see them in Google Sheets: menu `View → Hidden sheets`.
 
 ---
 
 ## FAQ
 
-**Q: Mi MWR all-time es +23%. ¿No es muy alto?**
+**Q: My all-time MWR is +23%. Isn't that very high?**
 
-Depende de qué hayas tenido. Si tu cartera está concentrada en S&P 500 + tech ETFs durante un mercado alcista (2024-2026 ha sido fuerte) y has comprado en bajadas, +20-25% anualizado es plausible. Cifras así no se mantienen indefinidamente — los mercados se normalizan. Compara contra el S&P 500 YTD/12m del periodo equivalente.
+Depends on what you've held. If your portfolio is concentrated in S&P 500 + tech ETFs during a bull market (2024-2026 has been strong) and you've bought on dips, +20-25% annualized is plausible. Numbers like that don't last indefinitely — markets normalize. Compare against the S&P 500 YTD/12m of the equivalent period.
 
-**Q: TR app me da +14,08% pero `make insights` me da +14,51%. ¿De dónde sale la diferencia?**
+**Q: TR app gives me +14.08% but `make insights` gives +14.51%. Where does the difference come from?**
 
-Pequeñas diferencias (<1pp) suelen venir de:
-- Mi resta de saveback usa `amount_eur` del evento; TR usa `value_at_delivery` interno (puede haber un spread USD/EUR de céntimos por share saveback).
-- Movimientos de precio entre el momento que abriste la app y el momento que ejecutas el script.
+Small differences (<1pp) usually come from:
+- My saveback subtraction uses the event's `amount_eur`; TR uses internal `value_at_delivery` (there can be a USD/EUR spread of cents per saveback share).
+- Price movement between when you opened the app and when the script runs.
 
-Si la diferencia es >2pp, posiblemente hay alguna posición con `cost_basis` raro: ejecuta con `--verbose` y revisa la tabla por posición.
+If the difference is >2pp, there's possibly a position with a weird `cost_basis`: run with `--verbose` and check the per-position table.
 
-**Q: ¿Por qué el bloque "Aportado neto" no matchea mi cost basis propio?**
+**Q: Why doesn't the "Aportado neto" block match my own cost basis?**
 
-Porque son cosas distintas:
-- **Aportado neto** = `Σ BUYs − Σ SELLs` histórico (incluye lo que vendiste y ya no tienes).
-- **Cost basis propio** = lo que pagaste por las shares que tienes vivas AHORA (FIFO con saveback a coste 0).
+Because they're different things:
+- **Aportado neto** = `Σ BUYs − Σ SELLs` historical (includes what you sold and no longer hold).
+- **Own cost basis** = what you paid for the shares you currently have (FIFO with saveback at cost 0).
 
-Si has hecho ventas con beneficio o pérdida, los dos números divergen.
+If you've made profitable or losing sales, the two numbers diverge.
 
-**Q: ¿Cuándo refresca los datos? ¿Cada cuánto debo correr `make insights`?**
+**Q: When does it refresh data? How often should I run `make insights`?**
 
-Cada ejecución va a TR y descarga todo de cero (transacciones + portfolio). Con el cache TTL=5min, dos ejecuciones seguidas reutilizan los datos sin volver a TR.
+Each run goes to TR and downloads everything from scratch (transactions + portfolio). With the cache TTL=5min, two consecutive runs reuse the data without going back to TR.
 
-Para uso normal: una vez al día / a la semana. Cada ejecución guarda un snapshot en `_snapshots`, así que el histórico crece solo.
+For normal use: once a day / week. Each run saves a snapshot in `_snapshots`, so the history grows on its own.
 
-**Q: La métrica X me parece engañosa, ¿se puede desactivar?**
+**Q: I find metric X misleading, can I disable it?**
 
-Sí. En `config.yaml > features` pones la feature en `false`:
+Yes. In `config.yaml > features` set the feature to `false`:
 
 ```yaml
 features:
-  concentration: false   # apaga el bloque de concentración
-  saveback_metrics: false   # apaga las dos lecturas de plusvalía
+  concentration: false   # turn off the concentration block
+  saveback_metrics: false   # turn off the two unrealized-return readings
 ```
 
-Lista completa: `make features`.
+Full list: `make features`.
 
-**Q: ¿Cómo verifico que el MWR no es un bug numérico?**
+**Q: How do I verify the MWR isn't a numeric bug?**
 
-Lanza `make mwr-flows` y pega el output (TSV) en una hoja nueva de Sheets/Excel. Aplica `=XIRR(B:B, A:A)` y el resultado debe coincidir con el MWR all-time del bloque histórico (modo `income`). Si discrepa significativamente, hay un bug — abre un issue.
+Run `make mwr-flows` and paste the output (TSV) into a new Sheets/Excel sheet. Apply `=XIRR(B:B, A:A)` and the result should match the all-time MWR from the historical block (`income` mode). If it diverges significantly, it's a bug — open an issue.
 
-Para verificar el modo `deposit` (con saveback como aportación):
+To verify the `deposit` mode (with saveback as contribution):
 
 ```bash
 make mwr-flows BONUS=deposit
 ```
 
-**Q: Quiero un MWR para un periodo concreto que no sea YTD/12m.**
+**Q: I want an MWR for a specific period that's not YTD/12m.**
 
-Hoy no está expuesto en CLI. Tienes la función pura `core.metrics.mwr()` que acepta `start` y `end` arbitrarios; se usa así:
+Today it's not exposed in the CLI. You have the pure function `core.metrics.mwr()` that accepts arbitrary `start` and `end`; use it like:
 
 ```python
 from core.metrics import mwr
@@ -397,4 +395,4 @@ TZ = ZoneInfo("Europe/Madrid")
 mwr(txs, snapshot, start=datetime(2025, 6, 1, tzinfo=TZ), start_value=4500.0)
 ```
 
-Si lo necesitas como flag CLI, abre un issue.
+If you need it as a CLI flag, open an issue.

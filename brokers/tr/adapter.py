@@ -2,10 +2,7 @@
 Trade Republic adapter: translates TR raw events / portfolio into the
 broker-agnostic types defined in core.types.
 
-Adapter de Trade Republic: traduce los eventos brutos y el portfolio de TR
-a los tipos agnósticos definidos en core.types.
-
-Public surface / Superficie pública:
+Public surface:
   - raw_event_to_tx(raw, *, tz)          → Transaction | None  (pure)
   - fetch_transactions(tr, *, tz, since) → list[Transaction]   (async, I/O)
   - fetch_snapshot(tr, *, tz)            → PortfolioSnapshot   (async, I/O)
@@ -19,10 +16,10 @@ from zoneinfo import ZoneInfo
 from core.types import PortfolioSnapshot, Position, Transaction, TxKind
 
 
-# Subtitles (alemán) para clasificar SSP_CORPORATE_ACTION_CASH. Si TR introduce
-# subtitles nuevos, ampliar aquí; el código del usuario en config.yaml ya los
-# permite extender para el flujo de Renta — aquí los mantenemos en mínimo
-# operativo para métricas (dividend / bond_cash unificados como cash inflow).
+# German subtitles used to classify SSP_CORPORATE_ACTION_CASH. If TR
+# introduces new subtitles, extend them here; the user's config.yaml already
+# allows extending them for the Renta flow — here we keep them at a minimal
+# operational set for metrics (dividend / bond_cash unified as cash inflow).
 _DIVIDEND_SUBTITLES = {"Bardividende", "Aktienprämiendividende", "Kapitalertrag"}
 _BOND_CASH_SUBTITLES = {"Zinszahlung", "Kupon", "Endgültige Fälligkeit"}
 
@@ -49,9 +46,6 @@ def raw_event_to_tx(
     `gift_overrides` is the same dict accepted by the legacy renta logic:
     `{ISIN: {shares, cost_eur}}`. Used to patch GIFTING events whose details
     section TR does not return parseable.
-
-    Convierte un evento bruto de TR en una Transaction. Devuelve None si el
-    evento no es relevante (cancelado, mal formado, o un tipo que ignoramos).
     """
     if raw.get("status") in _EXCLUDED_STATUSES:
         return None
@@ -138,8 +132,9 @@ def raw_event_to_tx(
             isin = d.get("isin")
             amount_eur = float(value)
         elif subtitle in _BOND_CASH_SUBTITLES:
-            # Cupones y amortización los tratamos como cash-in tipo dividendo
-            # para flujo de caja. Para Renta el flujo IRPF se computa aparte.
+            # Coupons and bond maturity are treated as dividend-like cash-in
+            # for cash-flow purposes. For Renta the IRPF flow is computed
+            # separately.
             kind = TxKind.DIVIDEND
             isin = extract_isin_from_icon(raw)
             amount_eur = float(value)
@@ -250,10 +245,10 @@ async def fetch_price_history(
         })
         result = await _asyncio.wait_for(tr._recv_subscription(sub_id), timeout=timeout)
     except _asyncio.TimeoutError:
-        log.warning(f"   ⏱  timeout esperando {topic} para {isin}.{exchange}")
+        log.warning(f"   ⏱  timeout waiting for {topic} for {isin}.{exchange}")
         return []
     except Exception as e:
-        log.warning(f"   ⚠  error en {topic} para {isin}.{exchange}: {type(e).__name__}: {e}")
+        log.warning(f"   ⚠  error in {topic} for {isin}.{exchange}: {type(e).__name__}: {e}")
         return []
     finally:
         if sub_id is not None:
@@ -264,16 +259,16 @@ async def fetch_price_history(
 
     if debug:
         keys = list(result.keys()) if isinstance(result, dict) else type(result).__name__
-        log.info(f"   [debug] respuesta {isin}: keys={keys}")
+        log.info(f"   [debug] response for {isin}: keys={keys}")
 
     if not isinstance(result, dict):
-        log.warning(f"   ⚠  respuesta no-dict para {isin}: {type(result).__name__}")
+        log.warning(f"   ⚠  non-dict response for {isin}: {type(result).__name__}")
         return []
     aggs = result.get("aggregates")
     if aggs is None:
         aggs = result.get("data") or []
     if not isinstance(aggs, list):
-        log.warning(f"   ⚠  no encontré lista de bars en respuesta para {isin}: keys={list(result.keys())}")
+        log.warning(f"   ⚠  could not find a list of bars in response for {isin}: keys={list(result.keys())}")
         return []
 
     out = []
@@ -292,7 +287,7 @@ async def fetch_price_history(
             continue
     out.sort(key=lambda x: x["ts"])
     if debug:
-        log.info(f"   [debug] {isin}: {len(out)} barras parseadas")
+        log.info(f"   [debug] {isin}: {len(out)} bars parsed")
     return out
 
 
@@ -335,7 +330,7 @@ async def fetch_instrument_exchanges(
         log.info(f"   [debug] instrument_details({isin}) keys: {list(result.keys())}")
 
     if not isinstance(result, dict):
-        log.warning(f"   ⚠  instrument_details({isin}) devolvió {type(result).__name__}, no dict")
+        log.warning(f"   ⚠  instrument_details({isin}) returned {type(result).__name__}, not dict")
         return []
 
     # TR returns a structure like {"exchanges": [{"slug": "LSX", ...}, ...]} or
@@ -399,14 +394,14 @@ async def fetch_price_history_with_fallback(
         )
         if history:
             if exch != exchanges[0]:
-                log.info(f"   ✓  {isin} encontrado en exchange '{exch}' (fallback)")
+                log.info(f"   ✓  {isin} found on exchange '{exch}' (fallback)")
             return history, exch
 
     # Last resort: ask TR what exchanges it actually has for this ISIN.
     discovered = await fetch_instrument_exchanges(tr, isin, timeout=timeout, debug=debug)
     new_exchanges = [e for e in discovered if e not in tried]
     if new_exchanges:
-        log.info(f"   → {isin}: probando exchanges descubiertos: {new_exchanges}")
+        log.info(f"   → {isin}: trying discovered exchanges: {new_exchanges}")
         for exch in new_exchanges:
             history = await fetch_price_history(
                 tr, isin,
@@ -416,7 +411,7 @@ async def fetch_price_history_with_fallback(
                 debug=False,
             )
             if history:
-                log.info(f"   ✓  {isin} encontrado en exchange '{exch}' (descubierto via instrument_details)")
+                log.info(f"   ✓  {isin} found on exchange '{exch}' (discovered via instrument_details)")
                 return history, exch
     return [], None
 
@@ -432,10 +427,7 @@ def price_at(history: list[dict], target: datetime) -> Optional[float]:
 
 
 async def fetch_snapshot(tr, *, tz: ZoneInfo) -> PortfolioSnapshot:
-    """Build a PortfolioSnapshot from TR's compact portfolio + cash.
-
-    Construye un PortfolioSnapshot a partir del portfolio compacto + cash de TR.
-    """
+    """Build a PortfolioSnapshot from TR's compact portfolio + cash."""
     from brokers.tr.sync_io import fetch_tr_portfolio_and_cash
 
     positions, cash = await fetch_tr_portfolio_and_cash(tr)

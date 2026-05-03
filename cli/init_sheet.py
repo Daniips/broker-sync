@@ -24,19 +24,19 @@ def init_sheet(dry_run: bool = False):
 
     Idempotent: if a tab already exists it's left alone and only logged.
     Tabs created (when the matching feature is enabled):
-      - Gastos / Ingresos / Dinero invertido <year>: empty; sync will create
+      - Expenses / Income / Investments <year>: empty; sync will create
         the month headers the first time it writes.
       - Portfolio: with `portfolio_cell_map` labels in the column to the
         left of `portfolio_value_range`, so it's visible which asset
         corresponds to each cell.
-      - Estado sync and _sync_state are created automatically later
+      - Status and sync_state tabs are created automatically later
         (status on first write_status, sync_state on first load_synced_ids).
     """
-    log.info("Abriendo Google Sheet...")
+    log.info("Opening Google Sheet...")
     spreadsheet = open_spreadsheet()
     log.info(f"  → {spreadsheet.title}")
     existing = {ws.title for ws in spreadsheet.worksheets()}
-    log.info(f"  Pestañas existentes: {sorted(existing)}")
+    log.info(f"  Existing tabs: {sorted(existing)}")
 
     targets = []
     if FEATURES.get("expenses", True):
@@ -51,20 +51,20 @@ def init_sheet(dry_run: bool = False):
     created = 0
     for name, kind in targets:
         if name in existing:
-            log.info(f"  ✓ '{name}' ya existe — no se toca.")
+            log.info(f"  ✓ '{name}' already exists — leaving it alone.")
             continue
         if dry_run:
-            log.info(f"  [dry-run] crearía '{name}' ({kind}).")
+            log.info(f"  [dry-run] would create '{name}' ({kind}).")
             continue
         ws = spreadsheet.add_worksheet(title=name, rows=200, cols=26)
-        log.info(f"  ✚ Creada '{name}' ({kind}).")
+        log.info(f"  ✚ Created '{name}' ({kind}).")
         created += 1
 
         if kind == "portfolio":
             col, row_start, row_end = parse_a1_column_range(PORTFOLIO_VALUE_RANGE)
             if col is None:
-                log.warning(f"     portfolio_value_range='{PORTFOLIO_VALUE_RANGE}' no parseable; "
-                            f"no se prerellena la columna de labels.")
+                log.warning(f"     portfolio_value_range='{PORTFOLIO_VALUE_RANGE}' not parseable; "
+                            f"label column will not be prefilled.")
             else:
                 col_idx = column_letter_to_index(col)
                 # Header row at row_start - 1 (if there's space)
@@ -79,14 +79,14 @@ def init_sheet(dry_run: bool = False):
                         if r > row_end:
                             break
                         ws.update_cell(r, label_col, label)
-                    log.info(f"     labels prerellenados en columna {chr(ord('A') + label_col - 1)}.")
+                    log.info(f"     labels prefilled in column {chr(ord('A') + label_col - 1)}.")
 
         elif kind == "investments":
             ws.update_cell(1, 1, INIT_HEADERS["investments_asset_column"])
             assets = sorted(set(ASSET_NAME_MAP.values()))
             for i, asset in enumerate(assets, start=2):
                 ws.update_cell(i, 1, asset)
-            log.info(f"     {len(assets)} activos prerellenados en columna A.")
+            log.info(f"     {len(assets)} assets prefilled in column A.")
 
         elif kind in ("expenses", "income"):
             sheet_layout = SHEET_CONFIGS[name].get("layout", LAYOUT_DEFAULT)
@@ -98,8 +98,8 @@ def init_sheet(dry_run: bool = False):
                 ws.update_cell(1, concept_col, LEDGER_HEADERS[1])
                 ws.update_cell(1, amount_col, LEDGER_HEADERS[2])
                 cols_repr = f"{LEDGER_COLUMNS['date']}/{LEDGER_COLUMNS['concept']}/{LEDGER_COLUMNS['amount']}"
-                log.info(f"     headers ledger en columnas {cols_repr} de fila 1.")
+                log.info(f"     ledger headers in columns {cols_repr} of row 1.")
 
-    log.info(f"\n✅ init-sheet completado. {created} pestaña(s) creada(s).")
+    log.info(f"\n✅ init-sheet finished. {created} tab(s) created.")
     if not dry_run:
-        log.info(f"   Pestañas Estado sync y _sync_state se crearán automáticamente al primer sync.")
+        log.info(f"   Status and sync_state tabs will be created automatically on the first sync.")

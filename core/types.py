@@ -1,14 +1,9 @@
 """
 Broker-agnostic data model for transactions, positions and portfolio snapshots.
-Modelo de datos agnóstico de broker para transacciones, posiciones y snapshots.
 
 Each broker adapter (brokers/*/adapter.py) is responsible for translating its
 raw events into these types. core/* modules consume only these types — they
 must not import from brokers/*.
-
-Cada adapter de broker (brokers/*/adapter.py) es responsable de traducir sus
-eventos raw a estos tipos. Los módulos en core/* solo consumen estos tipos —
-no deben importar de brokers/*.
 """
 from __future__ import annotations
 

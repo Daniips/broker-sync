@@ -19,7 +19,7 @@ from core.utils import column_letter_to_index
 def find_month_columns(worksheet, year, month):
     """Locate the (col_concepto, col_importe) pair by header in row 1.
 
-    Assumes the concepto column sits to the left of the importe column.
+    Assumes the concept column sits to the left of the amount column.
     """
     headers = worksheet.row_values(1)
     expected = _ts.MONTH_HEADER_AMOUNT.format(month=_ts.MONTH_NAMES_ES[month-1], year=year).lower()
@@ -31,14 +31,14 @@ def find_month_columns(worksheet, year, month):
 
 
 def create_month_columns(worksheet, year, month):
-    """Append two new columns (concepto + importe) at the right of row 1."""
+    """Append two new columns (concept + amount) at the right of row 1."""
     headers = worksheet.row_values(1)
     next_col = len(headers) + 1
     concepto_header = _ts.MONTH_HEADER_CONCEPT.format(month=_ts.MONTH_NAMES_ES[month-1], year=year)
     importe_header = _ts.MONTH_HEADER_AMOUNT.format(month=_ts.MONTH_NAMES_ES[month-1], year=year)
     worksheet.update_cell(1, next_col, concepto_header)
     worksheet.update_cell(1, next_col + 1, importe_header)
-    _ts.log.info(f"   [{worksheet.title}] columnas creadas: '{concepto_header}' | '{importe_header}'")
+    _ts.log.info(f"   [{worksheet.title}] columns created: '{concepto_header}' | '{importe_header}'")
     return (next_col, next_col + 1)
 
 
@@ -113,7 +113,7 @@ def _sync_monthly_columns_layout(spreadsheet, sheet_name, txs, dry_run, cfg):
     written_ids = []
     for (year, month), month_txs in sorted(by_month.items()):
         month_txs.sort(key=lambda e: e["ts"])
-        _ts.log.info(f"\n[{sheet_name} / {_ts.MONTH_NAMES_ES[month-1].capitalize()} {year}] {len(month_txs)} movimientos:")
+        _ts.log.info(f"\n[{sheet_name} / {_ts.MONTH_NAMES_ES[month-1].capitalize()} {year}] {len(month_txs)} movements:")
         for tx in month_txs:
             _ts.log.info(f"   {tx['ts'].date()}  {tx['importe']:>8.2f}  {tx['concepto']}")
 
@@ -147,7 +147,7 @@ def _sync_ledger_layout(spreadsheet, sheet_name, txs, dry_run):
     worksheet = spreadsheet.worksheet(sheet_name)
     txs_sorted = sorted(txs, key=lambda e: e["ts"])
 
-    _ts.log.info(f"\n[{sheet_name} / ledger] {len(txs_sorted)} movimientos:")
+    _ts.log.info(f"\n[{sheet_name} / ledger] {len(txs_sorted)} movements:")
     for tx in txs_sorted:
         _ts.log.info(f"   {tx['ts'].date()}  {tx['importe']:>8.2f}  {tx['concepto']}")
 

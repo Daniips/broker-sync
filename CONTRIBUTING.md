@@ -1,91 +1,91 @@
-# Contribuir a tr-sync
+# Contributing to tr-sync
 
-¡Gracias por interesarte en mejorar tr-sync! Esta guía describe cómo contribuir.
+Thanks for your interest in improving tr-sync! This guide describes how to contribute.
 
 ---
 
-## Cómo reportar un bug
+## How to report a bug
 
-Abre un issue describiendo:
+Open an issue describing:
 
-1. **Qué esperabas** que pasase.
-2. **Qué pasó** en realidad (incluye el output completo de la consola, mejor con `make sync` o `make renta` que estés ejecutando).
-3. **Cómo reproducirlo** (versión de Python, sistema operativo, comando ejecutado, contenido relevante de `config.yaml` **sin tus datos personales** — sustituye Sheet ID/ISINs/nombres por placeholders).
-4. **Versión** de `tr-sync`: `git rev-parse HEAD`.
+1. **What you expected** to happen.
+2. **What actually happened** (include the full console output, ideally from the `make sync` or `make renta` you're running).
+3. **How to reproduce it** (Python version, operating system, command run, relevant `config.yaml` contents **without your personal data** — replace Sheet ID/ISINs/names with placeholders).
+4. **Version** of `tr-sync`: `git rev-parse HEAD`.
 
-Si el bug es relativo a un evento concreto de TR, lánzalo:
+If the bug relates to a specific TR event, run:
 
 ```bash
-.venv/bin/python inspect_events.py --eventtype <TIPO>
+.venv/bin/python inspect_events.py --eventtype <TYPE>
 ```
 
-y pega el JSON resultante (ofusca cualquier dato personal antes).
+and paste the resulting JSON (obfuscate any personal data first).
 
 ---
 
-## Cómo proponer una feature
+## How to propose a feature
 
-Abre un issue describiendo:
+Open an issue describing:
 
-- El **caso de uso** (cuándo y por qué te haría falta).
-- Si ya tienes en mente cómo implementarla.
+- The **use case** (when and why you'd need it).
+- Whether you already have an idea of how to implement it.
 
-Antes de empezar a programar, espera a que alguien (probablemente el mantenedor) la valide. Hay features que tienen sentido para ciertos usuarios pero no encajan con el diseño general.
+Before you start coding, wait for someone (probably the maintainer) to validate it. Some features make sense for certain users but don't fit the overall design.
 
 ---
 
-## Cómo enviar un Pull Request
+## How to send a Pull Request
 
-1. **Fork** del repo y clónalo.
-2. **Crea una rama** descriptiva: `git checkout -b fix/dividend-without-isin` o `feat/csv-export`.
-3. **Asegúrate de que los tests pasan**: `make test`.
-4. **Añade tests** para tu cambio si es lógica nueva. El proyecto valora tests de la lógica pura (parsers, FIFO, agregadores) sobre tests con red.
-5. **Haz commit** con mensajes descriptivos. Sigue [Conventional Commits](https://www.conventionalcommits.org/) si puedes (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
-6. **Abre el PR** describiendo qué hace el cambio y cómo probarlo.
+1. **Fork** the repo and clone it.
+2. **Create a descriptive branch**: `git checkout -b fix/dividend-without-isin` or `feat/csv-export`.
+3. **Make sure the tests pass**: `make test`.
+4. **Add tests** for your change if it's new logic. The project values tests for pure logic (parsers, FIFO, aggregators) over network tests.
+5. **Commit** with descriptive messages. Follow [Conventional Commits](https://www.conventionalcommits.org/) when you can (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
+6. **Open the PR** describing what the change does and how to test it.
 
-### Estilo de código
+### Code style
 
 - **Python 3.11+**.
-- Sin formateador automático impuesto, pero respeta el estilo existente (docstrings cortas en español, un par de líneas máximo; nombres en `snake_case`).
-- No añadas dependencias nuevas sin justificación. Si las añades, mete la pinned version en `requirements.txt`.
-- No añadas comentarios obvios; solo cuando expliquen el *por qué*, no el *qué*.
+- No automatic formatter enforced, but respect the existing style (short docstrings, two lines max; `snake_case` names).
+- Don't add new dependencies without justification. If you do, put the pinned version in `requirements.txt`.
+- Don't add obvious comments; only when they explain the *why*, not the *what*.
 
 ### Tests
 
-- Los tests están en `test_tr_sync.py` y usan `unittest` (sin pytest, sin red).
-- Si tu cambio toca un parser de eventos de TR, añade un test con un fixture mínimo que reproduzca el JSON real de TR.
-- Si tu cambio toca el FIFO o agregadores, añade casos límite (cero shares, fracciones, dedup, mezcla de regalos…).
+- Tests live in `test_tr_sync.py` and use `unittest` (no pytest, no network).
+- If your change touches a TR event parser, add a test with a minimal fixture that reproduces TR's real JSON.
+- If your change touches FIFO or aggregators, add edge cases (zero shares, fractions, dedup, mixed gifts…).
 
-### Documentación
+### Documentation
 
-Si tu cambio:
+If your change:
 
-- **Cambia o añade un campo de `config.yaml`** → actualiza `config.example.yaml` y `CONFIG.md`.
-- **Cambia algo del informe IRPF** → actualiza `RENTA.md`.
-- **Cambia la estructura esperada del Sheet** → actualiza `SHEET_TEMPLATE.md`.
-- **Añade un comando** → actualiza `Makefile` (ayuda incluida) y `README.md` (sección de comandos).
+- **Changes or adds a `config.yaml` field** → update `config.example.yaml` and `CONFIG.md`.
+- **Changes anything in the IRPF report** → update `RENTA.md`.
+- **Changes the expected Sheet structure** → update `SHEET_TEMPLATE.md`.
+- **Adds a command** → update the `Makefile` (with help) and `README.md` (commands section).
 
 ---
 
-## Pruebas locales sin tocar tu Sheet real
+## Local testing without touching your real Sheet
 
-Antes de enviar un PR, verifica que tus cambios no rompen tu propio sync:
+Before sending a PR, verify that your changes don't break your own sync:
 
 ```bash
 make verify        # portfolio dry-run
-make test          # tests unitarios
+make test          # unit tests
 ```
 
-Si vas a probar un sync completo, considera apuntar `config.yaml` a un Sheet de prueba para no contaminar el real.
+If you're going to test a full sync, consider pointing `config.yaml` at a test Sheet so you don't pollute the real one.
 
 ---
 
-## Contacto
+## Contact
 
-Si tienes una duda que no encaja como issue (p.ej. consulta arquitectónica), abre una discusión en GitHub Discussions si está habilitado, o pon contexto en un issue marcado como `question`.
+If you have a question that doesn't fit as an issue (e.g. an architectural inquiry), open a discussion in GitHub Discussions if it's enabled, or add context in an issue tagged as `question`.
 
 ---
 
-## Licencia
+## License
 
-Al contribuir aceptas que tu código se distribuya bajo la licencia MIT del proyecto.
+By contributing you accept that your code is distributed under the project's MIT license.

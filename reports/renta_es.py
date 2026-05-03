@@ -1,15 +1,8 @@
 """
-Informe IRPF español (Renta) generado a partir de eventos de Trade Republic.
-
 Spanish tax report (Renta) generated from Trade Republic events.
 
-Este módulo es España-específico. Para otros regímenes fiscales (UK ISA,
-DE Steuerbericht, etc.) se añadirían módulos hermanos `reports/renta_uk.py`,
-`reports/renta_de.py`, etc., todos consumiendo `core.fifo` y los parsers de
-`brokers/tr/parser.py`.
-
-This module is Spain-specific. For other tax regimes (UK ISA, DE
-Steuerbericht, etc.) sibling modules `reports/renta_uk.py` /
+This module is Spain-specific. For other tax regimes (UK ISA,
+DE Steuerbericht, etc.) sibling modules `reports/renta_uk.py` /
 `renta_de.py` would be added, all consuming `core.fifo` and the parsers
 in `brokers/tr/parser.py`.
 """
@@ -43,14 +36,12 @@ TAX_LOT_EVENT_TYPES = {
 }
 
 # Gifts: their cost basis lives in details.sections (not in amount.value).
-# Regalos: el coste fiscal está en details.sections, no en amount.value.
 GIFT_EVENT_TYPES = {
     "GIFTING_RECIPIENT_ACTIVITY",
     "GIFTING_LOTTERY_PRIZE_ACTIVITY",
 }
 
 # Order of preference when the same trade appears under two eventTypes.
-# Orden de preferencia cuando el mismo trade aparece en dos eventTypes.
 _TAX_LOT_PREFERENCE = {
     "TRADING_TRADE_EXECUTED": 0,
     "TRADING_SAVINGSPLAN_EXECUTED": 1,
@@ -64,11 +55,11 @@ _TAX_LOT_PREFERENCE = {
 # ── Lots and sales builder ────────────────────────────────────────────────
 
 def _build_lots_and_sales(events, target_year):
-    """Del histórico completo: lotes de compra (ordenados) + ventas del año target.
+    """From the full history: buy lots (sorted) + sales for the target year.
 
-    `amount.value` ya es neto (incluye comisión descontada en venta / sumada en compra),
-    por tanto coste de adquisición = abs(amount.value) para compras y valor de
-    transmisión = amount.value para ventas.
+    `amount.value` is already net (includes the fee subtracted on sells /
+    added on buys), so acquisition cost = abs(amount.value) for buys and
+    transfer value = amount.value for sales.
     """
     log = tr_sync.log
     tz = tr_sync.TIMEZONE
@@ -80,7 +71,7 @@ def _build_lots_and_sales(events, target_year):
     skipped = []
     seen = set()  # dedup: (isin, ts_to_minute, abs(value))
 
-    # Prioriza TRADING_TRADE_EXECUTED sobre TRADE_INVOICE si coexisten.
+    # Prefer TRADING_TRADE_EXECUTED over TRADE_INVOICE when they coexist.
     ordered = sorted(events, key=lambda e: _TAX_LOT_PREFERENCE.get(e.get("eventType"), 99))
 
     for raw in ordered:
@@ -95,13 +86,13 @@ def _build_lots_and_sales(events, target_year):
         ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(tz)
         title = (raw.get("title") or "").strip()
 
-        # Regalos (lotería / ETF-Geschenk): el coste fiscal está en details, no en amount.value.
+        # Gifts (lottery / ETF-Geschenk): fiscal cost lives in details, not in amount.value.
         if et in GIFT_EVENT_TYPES:
             g = extract_gift_details(raw)
             isin = g["isin"]
             shares = g["shares"]
             cost = g["cost_eur"]
-            # Override manual si TR no trae datos
+            # Manual override when TR doesn't return parseable data
             if isin in gift_cost_overrides:
                 ov = gift_cost_overrides[isin]
                 shares = ov.get("shares", shares)
@@ -137,7 +128,7 @@ def _build_lots_and_sales(events, target_year):
             continue
         seen.add(fingerprint)
 
-        if value > 0:  # venta
+        if value > 0:  # sale
             if ts.year != target_year:
                 continue
             sales.append({
@@ -147,7 +138,7 @@ def _build_lots_and_sales(events, target_year):
                 "shares": shares,
                 "proceeds_eur": abs(value),
             })
-        else:  # compra
+        else:  # buy
             buy_lots.append({
                 "timestamp": ts,
                 "isin": isin,
@@ -164,7 +155,7 @@ def _build_lots_and_sales(events, target_year):
 # ── Income collectors ─────────────────────────────────────────────────────
 
 def _collect_dividends(events, year):
-    """Lista de dividendos del año con bruto, retención y neto por operación."""
+    """List of the year's dividends with gross, withholding and net per operation."""
     tz = tr_sync.TIMEZONE
     excluded_statuses = tr_sync.EXCLUDED_STATUSES
     dividend_subtitles = tr_sync.DIVIDEND_SUBTITLES
@@ -199,7 +190,7 @@ def _collect_dividends(events, year):
 
 
 def _collect_interest(events, year):
-    """Lista de intereses en efectivo del año (INTEREST_PAYOUT[_CREATED])."""
+    """List of the year's cash interest (INTEREST_PAYOUT[_CREATED])."""
     tz = tr_sync.TIMEZONE
     excluded_statuses = tr_sync.EXCLUDED_STATUSES
 
@@ -229,13 +220,15 @@ def _collect_interest(events, year):
 
 
 def _collect_bond_income(events, year):
-    """Rendimiento neto de bonos, agrupado por ISIN.
+    """Net bond yield, grouped by ISIN.
 
-    Para cada bono con cupón/amortización en `year`:
-      rendimiento_neto = cupones_año + importe_amortización − coste_de_compra
+    For each bond with coupon/maturity in `year`:
+      net_yield = year_coupons + maturity_amount − purchase_cost
 
-    Devuelve [{isin, title, cupones, amortizacion, coste, rendimiento_neto, flows}]
-    con `flows` = lista de dicts para trazabilidad.
+    Returns [{isin, title, cupones, amortizacion, coste, rendimiento_neto, flows}]
+    with `flows` = list of dicts for traceability. (Internal dict keys remain
+    in Spanish — they're consumed by the writer below which produces the
+    Spanish tax form output.)
     """
     tz = tr_sync.TIMEZONE
     excluded_statuses = tr_sync.EXCLUDED_STATUSES
@@ -244,7 +237,7 @@ def _collect_bond_income(events, year):
 
     by_isin = {}
 
-    # 1) Cupones y amortizaciones del año target — estos marcan qué ISINs son bonos
+    # 1) Coupons and maturities for the target year — these flag which ISINs are bonds
     for raw in events:
         if raw.get("status") in excluded_statuses:
             continue
@@ -277,7 +270,7 @@ def _collect_bond_income(events, year):
             e["cupones"] += float(value)
         e["flows"].append({"ts": ts, "subtitle": subtitle, "amount": float(value)})
 
-    # 2) Compras asociadas (cualquier fecha, todo el histórico) por ISIN de bono detectado
+    # 2) Associated purchases (any date, full history) for each detected bond ISIN
     for raw in events:
         if raw.get("status") in excluded_statuses:
             continue
@@ -298,7 +291,7 @@ def _collect_bond_income(events, year):
         by_isin[isin]["coste"] += abs(float(value))
         by_isin[isin]["flows"].append({"ts": ts, "subtitle": "Kauforder", "amount": float(value)})
 
-    # 3) Cerrar: calcular rendimiento neto y ordenar flows cronológicamente
+    # 3) Wrap up: compute net yield and sort flows chronologically
     out = []
     for isin, e in by_isin.items():
         e["rendimiento_neto"] = e["cupones"] + e["amortizacion"] - e["coste"]
@@ -309,7 +302,7 @@ def _collect_bond_income(events, year):
 
 
 def _collect_saveback(events, year):
-    """Saveback recibido en el año (controvertido fiscalmente: rendimiento en especie)."""
+    """Saveback received in the year (fiscally controversial: in-kind yield)."""
     tz = tr_sync.TIMEZONE
     excluded_statuses = tr_sync.EXCLUDED_STATUSES
 
@@ -338,7 +331,7 @@ def _collect_saveback(events, year):
 
 
 def _retentions_by_country(dividends):
-    """Agrupa retención extranjera por país (primeros 2 chars del ISIN)."""
+    """Group foreign withholdings by country (first 2 chars of the ISIN)."""
     by_country = defaultdict(lambda: {"gross": 0.0, "tax": 0.0, "net": 0.0, "count": 0})
     for d in dividends:
         isin = d.get("isin") or "??"
@@ -352,7 +345,7 @@ def _retentions_by_country(dividends):
 
 
 def _get_total_position_and_cash(tr):
-    """Snapshot completo: instrumentos + cash. Devuelve (items, total_inst, cash_items, cash_total)."""
+    """Full snapshot: instruments + cash. Returns (items, total_inst, cash_items, cash_total)."""
     positions, cash = asyncio.run(tr_sync.fetch_tr_portfolio_and_cash(tr))
     items = []
     total_inst = 0.0
@@ -381,7 +374,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
                          crypto, retentions=None, savebacks=None,
                          portfolio_items=None, portfolio_total=0.0,
                          cash_items=None, cash_total=0.0):
-    """Escribe el informe IRPF completo en la pestaña 'Renta YYYY'."""
+    """Write the full IRPF report to the 'Renta YYYY' tab."""
     log = tr_sync.log
     tz = tr_sync.TIMEZONE
     _es = tr_sync._es
@@ -427,7 +420,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
     if skipped:
         rows.append([f"Operaciones omitidas (sin ISIN/shares parseables): {len(skipped)}"])
 
-    # ── 2. Dividendos (casilla 0029) ──
+    # ── 2. Dividends (casilla 0029) ──
     rows.append([])
     rows.append([f"2. DIVIDENDOS — casilla 0029"])
     rows.append(["Fecha", "Asset", "ISIN", "Tipo", "Bruto (€)", "Retención (€)", "Neto (€)"])
@@ -444,7 +437,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
     rows.append(["TOTAL", "", "", "",
                  round(tot_gross, 2), round(tot_tax, 2), round(tot_net, 2)])
 
-    # ── 3. Intereses (casilla 0027) ──
+    # ── 3. Interest (casilla 0027) ──
     rows.append([])
     rows.append([f"3. INTERESES — casilla 0027"])
     rows.append(["Fecha", "Descripción", "Detalle", "Importe (€)"])
@@ -458,7 +451,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
         tot_int += i["amount"]
     rows.append(["TOTAL", "", "", round(tot_int, 2)])
 
-    # ── 4. Rendimientos de bonos / otros activos financieros (casilla 0031) ──
+    # ── 4. Bond yields / other financial assets (casilla 0031) ──
     rows.append([])
     rows.append([f"4. RENDIMIENTOS DE BONOS / OTROS ACT. FINANCIEROS — casilla 0031"])
     rows.append(["ISIN", "Título", "Cupones (€)", "Amortización (€)", "Coste compra (€)", "Rendimiento neto (€)"])
@@ -473,14 +466,14 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
         ])
         tot_bond += b["rendimiento_neto"]
     rows.append(["TOTAL", "", "", "", "", round(tot_bond, 2)])
-    # Detalle de flujos por bono
+    # Per-bond flow detail
     for b in bonds:
         rows.append([])
         rows.append([f"  Flujos {b['isin']} ({b['title']}):"])
         for f in b["flows"]:
             rows.append([f["ts"].date().isoformat(), _es(f["subtitle"]), "", "", "", round(f["amount"], 2)])
 
-    # ── 5. Resumen por casilla ──
+    # ── 5. Summary by casilla ──
     rows.append([])
     rows.append(["5. RESUMEN POR CASILLA (contrastar con borrador Hacienda)"])
     rows.append(["Casilla", "Concepto", "Importe script (€)"])
@@ -495,7 +488,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
         round(total_gain, 2),
     ])
 
-    # ── 6. Retenciones por país ──
+    # ── 6. Withholdings by country ──
     rows.append([])
     rows.append([f"6. RETENCIONES EXTRANJERAS POR PAÍS (deducción doble imposición)"])
     rows.append(["País (ISIN[:2])", "Nº dividendos", "Bruto (€)", "Retención (€)", "Neto (€)"])
@@ -513,7 +506,7 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
         tot_sb += s["amount"]
     rows.append(["TOTAL", "", round(tot_sb, 2)])
 
-    # ── 8. Cripto ──
+    # ── 8. Crypto ──
     rows.append([])
     rows.append([f"8. POSICIÓN CRIPTO (snapshot actual; Modelo 721 si >50k €)"])
     rows.append(["ISIN", "Activo", "Valor actual (€)"])
@@ -546,48 +539,48 @@ def write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interes
     rows.append([f"Generado: {datetime.now(tz=tz).strftime('%Y-%m-%d %H:%M')}"])
 
     ws.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
-    log.info(f"  pestaña '{sheet_name}' actualizada")
+    log.info(f"  tab '{sheet_name}' updated")
 
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
 def sync_renta(year, dry_run=False):
-    """Genera el informe IRPF del año fiscal `year` (consola + pestaña 'Renta YYYY').
+    """Generate the IRPF report for fiscal year `year` (console + 'Renta YYYY' tab).
 
-    Secciones del informe (ver RENTA.md para detalle de cada una):
-      1. Ganancias / pérdidas patrimoniales (FIFO por ISIN)
-      2. Dividendos (casilla 0029) con bruto, retención y neto
-      3. Intereses (casilla 0027)
-      4. Bonos / otros activos financieros (casilla 0031) con rendimiento neto
-      5. Resumen por casilla — para contrastar con el borrador de Hacienda
-      6. Retenciones extranjeras por país (deducción doble imposición)
-      7. Saveback recibido (controvertido fiscalmente, informativo)
-      8. Posición cripto (informativo Modelo 721)
-      9. Saldo total TR (orientativo Modelo 720; snapshot HOY, no a 31/12)
+    Report sections (see RENTA.md for details on each):
+      1. Capital gains / losses (FIFO per ISIN)
+      2. Dividends (casilla 0029) with gross, withholding, net
+      3. Interest (casilla 0027)
+      4. Bonds / other financial assets (casilla 0031) with net yield
+      5. Summary by casilla — to cross-check against Hacienda's draft
+      6. Foreign withholdings by country (double-taxation deduction)
+      7. Saveback received (fiscally controversial, informational)
+      8. Crypto position (informational Modelo 721)
+      9. Total TR balance (informative Modelo 720; snapshot TODAY, not 31/12)
 
-    Con `dry_run=True` solo imprime en consola, no escribe en la Sheet.
+    With `dry_run=True` only prints to console, does not write to the Sheet.
 
-    Importante: las cifras son orientativas; verifica contra el PDF
-    "Jährlicher Steuerbericht YYYY" oficial de TR antes de presentar la declaración.
+    Important: figures are informational; cross-check against TR's official
+    "Jährlicher Steuerbericht YYYY" PDF before filing.
     """
     log = tr_sync.log
     tz = tr_sync.TIMEZONE
     _es = tr_sync._es
 
     if not tr_sync.is_feature_enabled("renta"):
-        log.info("Feature 'renta' deshabilitada (config o broker).")
+        log.info("Feature 'renta' disabled (config or broker).")
         return
-    log.info(f"Conectando a Trade Republic...")
+    log.info(f"Connecting to Trade Republic...")
     tr = tr_sync.login()
     events = asyncio.run(tr_sync.fetch_tr_events(tr))
-    log.info(f"  {len(events)} eventos descargados (histórico completo)")
+    log.info(f"  {len(events)} events downloaded (full history)")
 
     buy_lots, sales, skipped = _build_lots_and_sales(events, year)
     dividends = _collect_dividends(events, year)
     interests = _collect_interest(events, year)
     bonds = _collect_bond_income(events, year)
 
-    # Cálculos (se hacen siempre — son baratos; los toggles solo afectan a la salida).
+    # Computations (always done — they're cheap; toggles only affect output).
     results = apply_fifo(buy_lots, sales) if sales else []
     total_proceeds = sum(r["sale"]["proceeds_eur"] for r in results)
     total_cost = sum(r["cost_basis"] for r in results)
@@ -603,37 +596,37 @@ def sync_renta(year, dry_run=False):
 
     sections = tr_sync.RENTA_SECTIONS
 
-    # ── 1. Ganancias/pérdidas ──
+# ── 1. Capital gains/losses ──
     if sections.get("fifo", True):
         log.info(f"\n[Renta {year}] 1. GANANCIAS/PÉRDIDAS PATRIMONIALES (FIFO)")
         if skipped:
-            log.warning(f"  {len(skipped)} operaciones sin ISIN/shares parseables — se omiten.")
+            log.warning(f"  {len(skipped)} operations without parseable ISIN/shares — skipped.")
         for r in results:
             s = r["sale"]
             sign = "+" if r["gain_loss"] >= 0 else ""
             log.info(f"  {s['timestamp'].date()}  {s['title']:<32} ISIN={s['isin']}  "
-                     f"vta={s['proceeds_eur']:>7.2f}€  coste={r['cost_basis']:>7.2f}€  "
-                     f"G/P={sign}{r['gain_loss']:>7.2f}€")
+                     f"sale={s['proceeds_eur']:>7.2f}€  cost={r['cost_basis']:>7.2f}€  "
+                     f"G/L={sign}{r['gain_loss']:>7.2f}€")
             if r["shares_unmatched"] > 1e-6:
-                log.warning(f"    AVISO: {r['shares_unmatched']:.6f} shares sin casar")
-        log.info(f"  → TOTAL G/P neta: {'+' if total_gain >= 0 else ''}{total_gain:.2f} €")
+                log.warning(f"    NOTE: {r['shares_unmatched']:.6f} shares unmatched")
+        log.info(f"  → Net G/L total: {'+' if total_gain >= 0 else ''}{total_gain:.2f} €")
 
-    # ── 2. Dividendos ──
+    # ── 2. Dividends ──
     if sections.get("dividends", True):
         log.info(f"\n[Renta {year}] 2. DIVIDENDOS (casilla 0029)")
         for d in dividends:
             log.info(f"  {d['timestamp'].date()}  {d['title']:<28} {_es(d['subtitle']):<28} "
-                     f"bruto={d['gross']:>6.2f}€  ret={d['tax']:>5.2f}€  neto={d['net']:>6.2f}€")
-        log.info(f"  → TOTAL: bruto={tot_gross:.2f}€  retención extranjera={tot_tax:.2f}€  neto={tot_net:.2f}€")
+                     f"gross={d['gross']:>6.2f}€  withh={d['tax']:>5.2f}€  net={d['net']:>6.2f}€")
+        log.info(f"  → TOTAL: gross={tot_gross:.2f}€  foreign withholding={tot_tax:.2f}€  net={tot_net:.2f}€")
 
-    # ── 3. Intereses ──
+    # ── 3. Interest ──
     if sections.get("interest", True):
         log.info(f"\n[Renta {year}] 3. INTERESES (casilla 0027)")
         for i in interests:
             log.info(f"  {i['timestamp'].date()}  {_es(i['title']):<14} {_es(i['subtitle']):<18} {i['amount']:>7.2f} €")
-        log.info(f"  → TOTAL intereses: {tot_int:.2f} €")
+        log.info(f"  → TOTAL interest: {tot_int:.2f} €")
 
-    # ── 4. Bonos (extranjeros) / otros activos financieros ──
+    # ── 4. Bonds (foreign) / other financial assets ──
     if sections.get("bonds", True):
         log.info(f"\n[Renta {year}] 4. RENDIMIENTOS DE BONOS / OTROS ACT. FINANCIEROS (casilla 0031)")
         for b in bonds:
@@ -648,7 +641,7 @@ def sync_renta(year, dry_run=False):
                      if b['coste'] > 0 else f"    → rendim. neto: {b['rendimiento_neto']:>+10.2f} €")
         log.info(f"  → TOTAL rendimiento neto bonos: {tot_bond:+.2f} €")
 
-    # ── 5. Resumen por casilla ──
+    # ── 5. Summary by casilla ──
     if sections.get("summary_by_box", True):
         log.info(f"\n[Renta {year}] 5. RESUMEN POR CASILLA (contrastar con borrador)")
         log.info(f"  Casilla 0027 (Intereses)           : {tot_int:>8.2f} €")
@@ -657,7 +650,7 @@ def sync_renta(year, dry_run=False):
         log.info(f"  Casilla 0031 (bonos/otros act.fin.): {tot_bond:>8.2f} €")
         log.info(f"  Ganancias/pérdidas patrimoniales   : {total_gain:>+8.2f} €  ({len(results)} ventas)")
 
-    # ── 6. Retenciones extranjeras por país ──
+    # ── 6. Foreign withholdings by country ──
     if sections.get("retentions", True):
         log.info(f"\n[Renta {year}] 6. RETENCIONES EXTRANJERAS POR PAÍS (deducción doble imposición)")
         for country, r in sorted(retentions.items()):
@@ -673,7 +666,7 @@ def sync_renta(year, dry_run=False):
         log.info(f"  {len(savebacks)} eventos saveback en {year}, total = {tot_sb:.2f} €")
         log.info(f"  TR no lo reporta a Hacienda. Algunos asesores lo declaran como rdto. capital mobiliario en 0029.")
 
-    # ── 8. Snapshot portfolio + cash (necesario para crypto y modelo720) ──
+    # ── 8. Snapshot portfolio + cash (needed for crypto and modelo720) ──
     portfolio_items, portfolio_total = [], 0.0
     cash_items, cash_total = [], 0.0
     crypto = []
@@ -681,7 +674,7 @@ def sync_renta(year, dry_run=False):
         try:
             portfolio_items, portfolio_total, cash_items, cash_total = _get_total_position_and_cash(tr)
         except Exception as e:
-            log.warning(f"  no se pudo obtener snapshot de portfolio/cash: {e}")
+            log.warning(f"  could not obtain portfolio/cash snapshot: {e}")
         for it in portfolio_items:
             if it["isin"] in tr_sync.CRYPTO_ISINS:
                 label = next((lbl for isin, lbl in tr_sync.PORTFOLIO_CELL_MAP if isin == it["isin"]), it["isin"])
@@ -712,10 +705,10 @@ def sync_renta(year, dry_run=False):
         log.info(f"  NOTA: el IBAN español de TR no exime del 720; lo que cuenta es el custodio (DE).")
 
     if dry_run:
-        log.info("\n[dry-run] no se escribe en la Sheet.")
+        log.info("\n[dry-run] nothing written to the Sheet.")
         return
 
-    log.info("\nAbriendo Google Sheet...")
+    log.info("\nOpening Google Sheet...")
     spreadsheet = tr_sync.open_spreadsheet()
     write_renta_to_sheet(spreadsheet, year, results, skipped, dividends, interests, bonds,
                          crypto, retentions, savebacks, portfolio_items, portfolio_total,

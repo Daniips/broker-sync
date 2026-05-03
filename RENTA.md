@@ -1,93 +1,93 @@
-# Informe IRPF (`make renta`)
+# IRPF report (`make renta`)
 
-Genera un informe completo del año fiscal con todo lo que necesitas para la **Declaración de la Renta** española (Modelo 100), más datos orientativos para los **Modelos 720/721**.
+Generates a complete report of the fiscal year with everything you need for the Spanish **Declaración de la Renta** (Modelo 100), plus orientative data for **Modelos 720/721**.
 
 ```bash
-make renta              # año actual − 1 (típico: en abril 2026 te saca 2025)
-make renta YEAR=2024    # un año concreto
+make renta              # current year − 1 (typical: in April 2026 you get 2025)
+make renta YEAR=2024    # a specific year
 ```
 
-El informe se vuelca a:
-- **Consola**: salida formateada legible.
-- **Google Sheet**: pestaña `Renta YYYY` (la crea/sobrescribe).
+The report is dumped to:
+- **Console**: human-readable formatted output.
+- **Google Sheet**: `Renta YYYY` tab (created/overwritten).
 
 ---
 
-## ⚠️ Disclaimer importante
+## ⚠️ Important disclaimer
 
-Las cifras del informe son **orientativas**. **Siempre verifícalas** contra el PDF oficial **"Jährlicher Steuerbericht YYYY"** que TR te envía cada año en abril (lo encuentras en tu timeline). Ese documento es el que TR reporta a Hacienda y es el que prevalece a efectos fiscales.
+The figures in the report are **orientative**. **Always verify them** against the official **"Jährlicher Steuerbericht YYYY"** PDF that TR sends you each year in April (you find it in your timeline). That document is what TR reports to Hacienda and is what prevails for tax purposes.
 
-El autor no se hace responsable de errores en tu declaración derivados del uso de esta herramienta.
+The author is not responsible for errors in your tax return derived from using this tool.
 
 ---
 
-## Estructura del informe
+## Report structure
 
-El informe tiene **9 secciones** que se generan en orden:
+The report has **9 sections** generated in order:
 
 ### 1. Ganancias / pérdidas patrimoniales (FIFO)
 
-Por cada **venta** realizada en el año:
+For each **sale** made in the year:
 
-- Casa la venta con sus compras anteriores aplicando **FIFO** (First In, First Out) **por ISIN** — la regla obligatoria en España para valores homogéneos.
-- Calcula:
-  - **Valor de transmisión** = neto recibido (incluye comisiones de venta descontadas).
-  - **Valor de adquisición** = coste total de las shares matched (incluye comisiones de compra).
+- Matches the sale with its prior purchases applying **FIFO** (First In, First Out) **per ISIN** — the mandatory rule in Spain for fungible securities.
+- Computes:
+  - **Valor de transmisión** = net received (includes sales fees deducted).
+  - **Valor de adquisición** = total cost of the matched shares (includes purchase fees).
   - **Ganancia / pérdida** = transmisión − adquisición.
 
-Soporta:
-- ✅ Acciones individuales (Apple, Tesla, Deutsche Telekom, etc.)
+Supports:
+- ✅ Individual stocks (Apple, Tesla, Deutsche Telekom, etc.)
 - ✅ ETFs (S&P 500, MSCI EM IMI, Digitalisation, etc.)
-- ✅ **Regalos de TR** (`ETF-Geschenk`, `Verlosung`/lotería) — el coste fiscal es el valor de mercado al recibirlos.
-- ✅ **Bonos** vendidos antes de vencimiento.
+- ✅ **TR gifts** (`ETF-Geschenk`, `Verlosung`/lottery) — the tax cost is the market value at receipt.
+- ✅ **Bonds** sold before maturity.
 
-Si una venta no encuentra suficiente histórico de compras, el informe muestra un aviso `HISTÓRICO INCOMPLETO`. Lee el FAQ más abajo.
+If a sale doesn't find enough purchase history, the report shows a `HISTÓRICO INCOMPLETO` warning. Read the FAQ below.
 
-**Dónde declararlas**:
-- **ETFs**: casilla específica de "fondos cotizados" (Hacienda **suele preliquidarlos** con datos de TR).
-- **Acciones individuales**: "transmisión de acciones admitidas a negociación" (Hacienda **NO** suele preliquidarlas — las añades tú).
+**Where to declare them**:
+- **ETFs**: specific box for "fondos cotizados" (Hacienda **usually pre-fills** with TR data).
+- **Individual stocks**: "transmisión de acciones admitidas a negociación" (Hacienda **does NOT** usually pre-fill — you add them yourself).
 
 ---
 
 ### 2. Dividendos (casilla 0029)
 
-Por cada `SSP_CORPORATE_ACTION_CASH` con subtitle `Bardividende`, `Aktienprämiendividende` o `Kapitalertrag`:
+For each `SSP_CORPORATE_ACTION_CASH` with subtitle `Bardividende`, `Aktienprämiendividende`, or `Kapitalertrag`:
 
-- **Bruto** (Bruttoertrag): importe antes de retenciones.
-- **Retención extranjera** (Steuer): impuesto retenido en origen (USA típico 15%, Alemania 25%+5,5%, etc.).
-- **Neto**: lo que efectivamente has cobrado.
+- **Bruto** (Bruttoertrag): amount before withholdings.
+- **Retención extranjera** (Steuer): tax withheld at source (US typical 15%, Germany 25%+5.5%, etc.).
+- **Neto**: what you actually received.
 
-**Dónde declararlos**: casilla **0029** ("Dividendos y demás rendimientos por la participación en fondos propios de entidades").
+**Where to declare them**: casilla **0029** ("Dividendos y demás rendimientos por la participación en fondos propios de entidades").
 
-> **Ojo**: TR es un broker alemán. Hacienda prerellena la 0029 con lo que TR le reporta automáticamente, pero **muchas veces se queda corto** (TR no siempre reporta dividendos de acciones extranjeras). Compara siempre el total del script con la cifra de tu borrador.
+> **Heads-up**: TR is a German broker. Hacienda pre-fills 0029 with what TR reports automatically, but **often falls short** (TR doesn't always report dividends from foreign stocks). Always compare the script's total with the figure on your borrador.
 
 ---
 
 ### 3. Intereses (casilla 0027)
 
-Suma de eventos `INTEREST_PAYOUT` / `INTEREST_PAYOUT_CREATED` del año. Esto incluye los intereses mensuales del cash de TR (los famosos "Zinsen" al 2,5–3,5% TAE).
+Sum of `INTEREST_PAYOUT` / `INTEREST_PAYOUT_CREATED` events for the year. This includes the monthly interest on TR cash (the famous "Zinsen" at 2.5–3.5% APR).
 
-**Dónde declararlos**: casilla **0027** ("Intereses de cuentas, depósitos y de activos financieros en general").
+**Where to declare them**: casilla **0027** ("Intereses de cuentas, depósitos y de activos financieros en general").
 
 ---
 
 ### 4. Rendimientos de bonos / otros activos financieros (casilla 0031)
 
-Para cada **bono** con cupón y/o amortización en el año, agrupa por ISIN y calcula el **rendimiento neto real**:
+For each **bond** with coupons and/or maturity in the year, groups by ISIN and computes the **real net yield**:
 
 ```
-rendimiento_neto = cupones_cobrados + importe_amortización − coste_de_compra
+net_yield = coupons_received + maturity_amount − purchase_cost
 ```
 
-**Dónde declararlos**: casilla **0031** ("Rendimientos procedentes de la transmisión, amortización o reembolso de otros activos financieros").
+**Where to declare them**: casilla **0031** ("Rendimientos procedentes de la transmisión, amortización o reembolso de otros activos financieros").
 
-> **Nota**: la casilla **0030** es exclusiva para **Letras del Tesoro español**. Bonos extranjeros (con prefijo XS, DE, etc.) van a 0031.
+> **Note**: casilla **0030** is exclusively for **Letras del Tesoro español**. Foreign bonds (with prefix XS, DE, etc.) go to 0031.
 
 ---
 
 ### 5. Resumen por casilla
 
-Tabla compacta para contrastar contra tu borrador de Hacienda:
+Compact table to cross-check against your Hacienda borrador:
 
 ```
 Casilla 0027 (Intereses)            : 176.12 €
@@ -97,42 +97,42 @@ Casilla 0031 (bonos/otros act.fin.) :  33.59 €
 Ganancias/pérdidas patrimoniales    : -23.29 €  (7 ventas)
 ```
 
-**Cómo usarlo**: abre tu borrador de la Renta y compara casilla por casilla. Las que difieran son las que tendrás que corregir/añadir manualmente.
+**How to use it**: open your Renta borrador and compare box by box. Those that differ are the ones you'll need to correct/add manually.
 
 ---
 
-### 6. Retenciones extranjeras por país
+### 6. Retención extranjera por país
 
-Agrupa los dividendos por **país de origen** (primeros 2 caracteres del ISIN: US, DE, FR, GB, etc.) y suma la retención de cada uno:
+Groups dividends by **country of origin** (first 2 characters of the ISIN: US, DE, FR, GB, etc.) and sums the withholding from each:
 
 ```
 US: 5 dividendos, bruto=12.34€, retención=1.85€, neto=10.49€
 DE: 1 dividendo, bruto=0.93€, retención=0.00€, neto=0.93€
 ```
 
-**Dónde declarar**: la **deducción por doble imposición internacional** (casillas 588-589 del Modelo 100). Te permite recuperar parte de la retención que ya pagaste en el extranjero, hasta el límite del IRPF español sobre esos dividendos.
+**Where to declare**: the **deducción por doble imposición internacional** (casillas 588-589 of Modelo 100). Lets you recover part of the withholding you already paid abroad, up to the limit of Spanish IRPF on those dividends.
 
 ---
 
-### 7. Saveback recibido
+### 7. Saveback received
 
-Suma de `SAVEBACK_AGGREGATE` del año (los céntimos que TR te devuelve en acciones cuando pagas con la tarjeta).
+Sum of `SAVEBACK_AGGREGATE` for the year (the cents TR returns to you in shares when you pay with the card).
 
-**Tratamiento fiscal**: discutible. TR **NO lo reporta** a Hacienda. Algunos asesores lo declaran como rendimiento del capital mobiliario en especie (casilla 0029); otros lo tratan como "descuento comercial" no sujeto. El script lo lista informativamente para que decidas tú.
-
----
-
-### 8. Posición cripto (snapshot actual)
-
-Listado de tus criptos según `crypto_isins` en `config.yaml`, con su valor actual en €.
-
-**Modelo 721**: si el saldo de criptos en proveedor extranjero (TR es alemán) **supera 50.000 €** a 31/12, hay obligación informativa. El snapshot actual del script **NO** es a 31/12 sino a hoy, pero te da una idea de si te acercas al umbral.
+**Tax treatment**: debatable. TR **does NOT report it** to Hacienda. Some advisors declare it as rendimiento del capital mobiliario in kind (casilla 0029); others treat it as a "commercial discount" not subject to tax. The script lists it informationally for you to decide.
 
 ---
 
-### 9. Saldo TR — orientativo Modelo 720
+### 8. Posición cripto (current snapshot)
 
-Suma de todas las posiciones en TR + cash en cuenta (en €):
+List of your crypto according to `crypto_isins` in `config.yaml`, with their current value in €.
+
+**Modelo 721**: if the balance of crypto at a foreign provider (TR is German) **exceeds 50,000 €** at 31/12, there's a reporting obligation. The script's current snapshot is **NOT** at 31/12 but as of today, but it gives you an idea of whether you're approaching the threshold.
+
+---
+
+### 9. Saldo total TR — orientative Modelo 720
+
+Sum of all positions in TR + cash in account (in €):
 
 ```
 Posiciones (instrumentos):  3456.78 €
@@ -140,19 +140,19 @@ Cash EUR             :       234.56 €
 TOTAL HOY (2026-04-25):     3691.34 €
 ```
 
-**Modelo 720**: declaración informativa de bienes y derechos en el extranjero. Obligación si el total **supera 50.000 €** a 31/12 (o saldo medio del último trimestre). El IBAN español de TR **NO** te exime — lo que cuenta es dónde se custodian los activos (Frankfurt, Alemania).
+**Modelo 720**: informative declaration of assets and rights abroad. Required if the total **exceeds 50,000 €** at 31/12 (or average balance of the last quarter). TR's Spanish IBAN does **NOT** exempt you — what counts is where the assets are custodied (Frankfurt, Germany).
 
-> **Nota**: el snapshot del script es de **hoy**, no a 31/12. Para el dato oficial usa el Jährlicher Steuerbericht.
+> **Note**: the script's snapshot is from **today**, not 31/12. For the official figure use the Jährlicher Steuerbericht.
 
 ---
 
-## Casos especiales
+## Special cases
 
-### Regalos de ETF (`ETF-Geschenk`)
+### ETF gifts (`ETF-Geschenk`)
 
-TR a veces te regala fracciones de ETF. El script los detecta como `GIFTING_RECIPIENT_ACTIVITY` y los añade como lotes de compra con coste = valor de mercado al recibirlos (sacado del JSON del propio evento).
+TR sometimes gifts you fractions of ETFs. The script detects them as `GIFTING_RECIPIENT_ACTIVITY` and adds them as purchase lots with cost = market value at receipt (taken from the event's own JSON).
 
-Si un regalo viene mal parseado y aparece "shares sin casar", añade el dato manualmente en `gift_cost_overrides` de `config.yaml`:
+If a gift is mis-parsed and "unmatched shares" appear, add the data manually to `gift_cost_overrides` in `config.yaml`:
 
 ```yaml
 gift_cost_overrides:
@@ -161,15 +161,15 @@ gift_cost_overrides:
     cost_eur: 25.00
 ```
 
-El valor exacto está en el PDF Jährlicher Steuerbericht.
+The exact value is in the Jährlicher Steuerbericht PDF.
 
-### Lotería de TR (`Verlosung`)
+### TR lottery (`Verlosung`)
 
-TR sortea acciones gratis (típicamente Tesla, Apple…). El script los detecta como `GIFTING_LOTTERY_PRIZE_ACTIVITY` y los trata igual que los regalos: coste fiscal = valor de mercado al recibirlos.
+TR raffles free shares (typically Tesla, Apple…). The script detects them as `GIFTING_LOTTERY_PRIZE_ACTIVITY` and treats them like gifts: tax cost = market value at receipt.
 
-### Bonos extranjeros con cupón
+### Foreign bonds with coupon
 
-El script agrupa por ISIN los eventos `Kauforder` (compra), `Zinszahlung` (cupón) y `Endgültige Fälligkeit` (amortización al vencimiento) y calcula el rendimiento neto real:
+The script groups by ISIN the events `Kauforder` (purchase), `Zinszahlung` (coupon), and `Endgültige Fälligkeit` (maturity) and computes the real net yield:
 
 ```
 ISIN XS0213101073  'Feb. 2025'
@@ -179,68 +179,68 @@ ISIN XS0213101073  'Feb. 2025'
   → rendim. neto:    +33.59 €  (+1.68% sobre inversión)
 ```
 
-### Acciones de empresas que cambian de ISIN (corporate actions)
+### Stocks of companies that change ISIN (corporate actions)
 
-Cuando una empresa hace un swap/wechsel/spinoff (eventos `SSP_CORPORATE_ACTION_ACTIVITY`), el ISIN puede cambiar. El script **no maneja** esto automáticamente — quedaría como "shares sin casar" en la venta posterior.
+When a company does a swap/wechsel/spinoff (events `SSP_CORPORATE_ACTION_ACTIVITY`), the ISIN can change. The script **doesn't handle** this automatically — it would show as "unmatched shares" on the subsequent sale.
 
-Workaround: añade un `gift_cost_overrides` manual con el coste original.
+Workaround: add a manual `gift_cost_overrides` with the original cost.
 
 ---
 
 ## FAQ
 
-**P: La cifra de mi script no coincide con el PDF Jährlicher Steuerbericht.**
-R: Mira si la diferencia está en:
-- Comisiones (TR a veces las imputa al coste de adquisición y otras al valor de transmisión, según país).
-- Retenciones (algunas reportadas a Hacienda y otras no).
-- Diferencias de cambio en bonos en USD.
-- Eventos en `gift_cost_overrides` con datos manuales que difieren del PDF.
+**Q: My script's figure doesn't match the Jährlicher Steuerbericht PDF.**
+A: Look at whether the difference is in:
+- Fees (TR sometimes charges them to acquisition cost and other times to transmission value, depending on country).
+- Withholdings (some reported to Hacienda and others not).
+- Currency differences in USD bonds.
+- Events in `gift_cost_overrides` with manual data that differs from the PDF.
 
-Confía siempre en el PDF para presentar la declaración. El script es una herramienta de revisión.
+Always trust the PDF for filing the return. The script is a review tool.
 
-**P: ¿Qué hago si Hacienda preliquida menos dividendos de los que me ha pagado TR?**
-R: Es habitual con dividendos de acciones extranjeras. Añade tú la diferencia en la casilla 0029 con el total del script. Si te retuvieron impuestos en origen, suma también la deducción por doble imposición (casillas 588-589).
+**Q: What do I do if Hacienda pre-fills fewer dividends than TR has paid me?**
+A: Common with foreign stock dividends. Add the difference yourself to casilla 0029 with the script's total. If you were withheld at source, also add the deducción por doble imposición (casillas 588-589).
 
-**P: Tengo varias compras del mismo ISIN antes de vender. ¿Cómo declaro la venta?**
-R: El FIFO ya las suma por ti. En el formulario suelen pedir "fecha de adquisición más antigua" → pon la del primer lote consumido y el coste total agregado de todos los lotes que se han casado.
+**Q: I have several purchases of the same ISIN before selling. How do I declare the sale?**
+A: FIFO already sums them for you. The form usually asks for "fecha de adquisición más antigua" → put the date of the first lot consumed and the aggregated total cost of all lots that were matched.
 
-**P: ¿Y si vendí solo una parte de una posición?**
-R: El FIFO del script consume las shares más antiguas hasta cubrir las que vendiste; las restantes quedan disponibles para futuras ventas. El coste reportado es solo el de las shares vendidas.
+**Q: What if I sold only part of a position?**
+A: The script's FIFO consumes the oldest shares to cover what you sold; the rest remain available for future sales. The reported cost is only that of the sold shares.
 
-**P: La venta dice "X shares sin casar — falta histórico de compras".**
-R: El script no encontró las compras de ese ISIN. Posibles causas:
-1. **Compras anteriores a tu rango de timeline**: si has movido la cartera de otro broker, faltan datos. Añade overrides en `gift_cost_overrides` o documenta a mano en la declaración.
-2. **Regalo con datos no parseables**: añade el ISIN a `gift_cost_overrides` con shares y coste del Steuerbericht.
-3. **Corporate action**: el ISIN cambió en el pasado. Mismo workaround.
+**Q: The sale says "X shares unmatched — buy history missing".**
+A: The script didn't find purchases of that ISIN. Possible causes:
+1. **Purchases prior to your timeline range**: if you've moved the portfolio from another broker, data is missing. Add overrides in `gift_cost_overrides` or document by hand on the return.
+2. **Gift with unparseable data**: add the ISIN to `gift_cost_overrides` with shares and cost from the Steuerbericht.
+3. **Corporate action**: the ISIN changed in the past. Same workaround.
 
-**P: ¿Por qué el saveback tiene tratamiento "controvertido"?**
-R: Porque la AEAT no se ha pronunciado claramente. Hay dos posturas:
-- **Es un descuento comercial** (como un cashback de tarjeta) → no se declara.
-- **Es un rendimiento del capital mobiliario en especie** → se declara en 0029.
-La práctica habitual es no declararlo, pero conserva los registros por si te preguntan.
+**Q: Why does saveback have "controversial" treatment?**
+A: Because the AEAT hasn't ruled clearly. There are two positions:
+- **It's a commercial discount** (like a card cashback) → not declared.
+- **It's rendimiento del capital mobiliario in kind** → declared in 0029.
+Common practice is not to declare it, but keep records in case you're asked.
 
-**P: ¿El script vale para declaraciones conjuntas o de no residentes?**
-R: El script asume tributación individual con residencia fiscal en España (IRPF). Para otros casos, los conceptos son los mismos pero las casillas/modelos cambian — adapta a tu situación.
-
----
-
-## Datos que NO procesa el informe
-
-Cosas que el script **no contempla** y tendrás que añadir/comprobar a mano:
-
-- ❌ Cuentas/inversiones fuera de TR (otro broker, banco, cripto en exchange...)
-- ❌ Compensación de pérdidas patrimoniales de años anteriores (puedes arrastrarlas hasta 4 años; el script no recuerda años cruzados).
-- ❌ Aportaciones a planes de pensiones, alquileres, rendimientos del trabajo, etc.
-- ❌ Rentas en especie (Saveback solo lo lista informativamente).
-- ❌ Compras/ventas de cripto realizadas con TR (no soportadas todavía; el script solo da snapshot de posición actual).
+**Q: Does the script work for joint or non-resident returns?**
+A: The script assumes individual taxation with Spanish tax residence (IRPF). For other cases, the concepts are the same but the boxes/forms change — adapt to your situation.
 
 ---
 
-## Lo que el script SÍ hace bien
+## Data the report does NOT process
 
-- ✅ FIFO por ISIN, robusto incluso con docenas de compras y ventas parciales.
-- ✅ Comisiones incluidas en el cálculo (ya están en el `amount.value` neto que devuelve TR).
-- ✅ Detecta cuándo un evento es regalo, lotería o bono y aplica la lógica fiscal correcta.
-- ✅ Dedup automático: si el mismo trade aparece en `TRADING_TRADE_EXECUTED` y en `TRADE_INVOICE` (TR a veces emite ambos), solo cuenta una vez.
-- ✅ Soporte de los formatos del JSON de TR antiguo (`TRADE_INVOICE` con sección Transaktion separada) y nuevo (`TRADING_TRADE_EXECUTED` con prefijo en displayValue).
-- ✅ Persistencia automática en la pestaña `Renta YYYY` (puedes consultarla cuando quieras sin re-ejecutar).
+Things the script **does not cover** and you'll have to add/check by hand:
+
+- ❌ Accounts/investments outside TR (another broker, bank, crypto on exchange...)
+- ❌ Offsetting capital losses from prior years (you can carry them forward up to 4 years; the script doesn't remember cross-years).
+- ❌ Pension plan contributions, rentals, work income, etc.
+- ❌ In-kind income (Saveback is only listed informationally).
+- ❌ Crypto buys/sells made with TR (not yet supported; the script only gives a snapshot of current position).
+
+---
+
+## What the script DOES do well
+
+- ✅ FIFO per ISIN, robust even with dozens of purchases and partial sales.
+- ✅ Fees included in the calculation (already in the net `amount.value` returned by TR).
+- ✅ Detects when an event is a gift, lottery, or bond and applies the correct tax logic.
+- ✅ Automatic dedup: if the same trade appears in `TRADING_TRADE_EXECUTED` and `TRADE_INVOICE` (TR sometimes emits both), it only counts once.
+- ✅ Support for the old TR JSON formats (`TRADE_INVOICE` with separate Transaktion section) and new (`TRADING_TRADE_EXECUTED` with prefix in displayValue).
+- ✅ Automatic persistence to the `Renta YYYY` tab (you can consult it whenever you want without re-running).

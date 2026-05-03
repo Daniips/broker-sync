@@ -6,17 +6,16 @@ and the corresponding feature(s) in core/features.py become available.
 """
 
 CAPABILITIES = frozenset({
-    # Datos básicos / Basic data
+    # Basic data
     "fetch_transactions",
     "fetch_snapshot",
     "fetch_price_history",
 
-    # Tipos de eventos que TR emite y nosotros consumimos
     # Event types TR emits that we consume
     "expense_tracking",   # CARD_TRANSACTION, PAYMENT_BIZUM_*, BANK_TRANSACTION_*
-    "saveback",            # SAVEBACK_AGGREGATE — perks de la tarjeta TR
+    "saveback",            # SAVEBACK_AGGREGATE — TR card perks
     "gifts",               # GIFTING_RECIPIENT_ACTIVITY, lottery prizes
 
-    # Informes específicos / Specific reports
-    "tax_renta_es",        # FIFO + dividendos en formato IRPF español
+    # Specific reports
+    "tax_renta_es",        # FIFO + dividends in the Spanish IRPF format
 })

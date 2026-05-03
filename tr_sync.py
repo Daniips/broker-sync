@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Sincroniza gastos e ingresos de Trade Republic con la Sheet."""
+"""Sync Trade Republic expenses and income with the Sheet."""
 
 import sys
 
-# Shortcircuit para el subcomando `config`: delega al config_cli ANTES de
-# cargar imports pesados (pytr, gspread) o el propio config.yaml. Esto permite
-# que `python tr_sync.py config init` funcione antes incluso de tener Sheet.
+# Shortcircuit for the `config` subcommand: delegate to config_cli BEFORE
+# loading heavy imports (pytr, gspread) or config.yaml itself. This allows
+# `python tr_sync.py config init` to work even before you have a Sheet.
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "config":
     from config_cli import main as _config_main
     sys.exit(_config_main(sys.argv[2:]))
@@ -30,9 +30,9 @@ from zoneinfo import ZoneInfo
 
 from pytr.account import login
 
-# Diccionario por defecto de traducciones alemán→castellano (la API de TR
-# responde siempre en alemán y solo traducimos para mostrar al usuario).
-# Se puede ampliar/sobrescribir desde config.yaml > subtitle_translations.
+# Default German→Spanish subtitle translation dictionary (the TR API always
+# responds in German and we only translate them for user display).
+# Can be extended/overridden via config.yaml > subtitle_translations.
 _DEFAULT_SUBTITLE_TRANSLATIONS = {
     "Bardividende": "Dividendo en efectivo",
     "Aktienprämiendividende": "Dividendo en acciones (premium)",
@@ -55,64 +55,66 @@ _DEFAULT_SUBTITLE_TRANSLATIONS = {
 
 
 def _es(label):
-    """Traduce un subtitle/título alemán al idioma del usuario. Si no hay traducción, devuelve el original."""
+    """Translate a German subtitle/title to the user's language. If no translation exists, return the original."""
     if not label:
         return label
     return SUBTITLE_TRANSLATIONS.get(label.strip(), label)
 
-# ── Carga y validación de configuración ───────────────────────────────────
+# ── Config loading and validation ─────────────────────────────────────────
 
 class ConfigError(Exception):
-    """Error de configuración con mensaje accionable para el usuario."""
+    """Configuration error with an actionable message for the user."""
 
 
 def _validate_config(cfg, source_path, *, allow_placeholders=False):
-    """Comprueba que el config tiene los campos críticos. Lanza ConfigError si no.
+    """Check that the config has the critical fields. Raises ConfigError if not.
 
-    Si `allow_placeholders=True` (caso fallback de config.example.yaml en CI / tests),
-    se acepta `sheet_id` con su valor placeholder sin error — el usuario real verá el
-    warning de "no se encuentra config.yaml" en stderr, pero los tests no rompen.
+    If `allow_placeholders=True` (config.example.yaml fallback case in CI /
+    tests), `sheet_id` is accepted with its placeholder value without error
+    — the real user will see the "config.yaml not found" warning on stderr,
+    but tests don't break.
     """
     errors = []
 
     sheet_id = cfg.get("sheet_id")
     is_placeholder = sheet_id and (sheet_id.startswith("REEMPLAZA") or sheet_id.startswith("REPLACE_"))
     if not sheet_id:
-        errors.append("• `sheet_id` falta. Pon el ID de tu Google Sheet.")
+        errors.append("• `sheet_id` is missing. Set the ID of your Google Sheet.")
     elif is_placeholder and not allow_placeholders:
-        errors.append("• `sheet_id` sigue con el placeholder. Pon el ID de tu Google Sheet.")
+        errors.append("• `sheet_id` still has the placeholder value. Set the ID of your Google Sheet.")
 
     sheets = cfg.get("sheets") or {}
     for required in ("expenses", "income", "investments_year_format", "portfolio", "status", "sync_state"):
         if not sheets.get(required):
-            errors.append(f"• `sheets.{required}` falta o está vacío.")
+            errors.append(f"• `sheets.{required}` missing or empty.")
 
     if "{year}" not in (sheets.get("investments_year_format") or ""):
-        errors.append("• `sheets.investments_year_format` debe contener '{year}' (ej. 'Dinero invertido {year}').")
+        errors.append("• `sheets.investments_year_format` must contain '{year}' (e.g. 'Dinero invertido {year}').")
 
     pcm = cfg.get("portfolio_cell_map")
     if not isinstance(pcm, list) or not pcm:
-        errors.append("• `portfolio_cell_map` falta o está vacía. Añade al menos un { isin, label }.")
+        errors.append("• `portfolio_cell_map` is missing or empty. Add at least one { isin, label }.")
     else:
         for i, entry in enumerate(pcm):
             if not isinstance(entry, dict) or "isin" not in entry or "label" not in entry:
-                errors.append(f"• `portfolio_cell_map[{i}]` debe ser {{ isin: ..., label: ... }}.")
+                errors.append(f"• `portfolio_cell_map[{i}]` must be {{ isin: ..., label: ... }}.")
 
     pvr = cfg.get("portfolio_value_range")
     if not pvr or ":" not in str(pvr):
-        errors.append("• `portfolio_value_range` falta o no parece un rango A1 (ej. 'C2:C8').")
+        errors.append("• `portfolio_value_range` is missing or doesn't look like an A1 range (e.g. 'C2:C8').")
 
     if errors:
         raise ConfigError(
-            f"Config inválida en {source_path}:\n  " + "\n  ".join(errors) +
-            "\n\n  Mira CONFIG.md para la referencia completa de cada campo."
+            f"Invalid config at {source_path}:\n  " + "\n  ".join(errors) +
+            "\n\n  See CONFIG.md for the full reference of each field."
         )
 
 
 def _load_config():
-    """Carga config.yaml; si no existe, intenta config.example.yaml con warning.
+    """Load config.yaml; if missing, try config.example.yaml with a warning.
 
-    Valida los campos críticos al cargar y aborta con un mensaje claro si algo falta.
+    Validate the critical fields on load and abort with a clear message if
+    something is missing.
     """
     import yaml
     here = Path(__file__).resolve().parent
@@ -123,14 +125,14 @@ def _load_config():
         path = real
     elif example.exists():
         sys.stderr.write(
-            f"⚠  No se encuentra {real}. Usando {example} (valores de plantilla).\n"
-            f"   Copia config.example.yaml a config.yaml y rellénalo con los tuyos.\n"
+            f"⚠  Could not find {real}. Using {example} (template values).\n"
+            f"   Copy config.example.yaml to config.yaml and fill in your own values.\n"
         )
         path = example
         using_example = True
     else:
         raise FileNotFoundError(
-            f"Falta config.yaml. Copia config.example.yaml → config.yaml y rellénalo."
+            f"config.yaml missing. Copy config.example.yaml → config.yaml and fill it in."
         )
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
@@ -152,9 +154,7 @@ PORTFOLIO_SHEET = _SHEETS["portfolio"]
 STATUS_SHEET = _SHEETS["status"]
 SYNC_STATE_SHEET = _SHEETS["sync_state"]
 SNAPSHOTS_SHEET = _SHEETS.get("snapshots", "_snapshots")
-SNAPSHOTS_POSITIONS_SHEET = _SHEETS.get("snapshots_positions", "_snapshots_positions")
-
-# Año fiscal de la pestaña inversiones (env var > config > año actual)
+SNAPSHOTS_POSITIONS_SHEET = _SHEETS.get("snapshots_positions", "_snapshots_positions")# Fiscal year of the investments tab (env var > config > current year)
 INVESTMENTS_SHEET_YEAR = int(
     os.environ.get("TR_SYNC_INVESTMENTS_YEAR")
     or _SHEETS.get("investments_year")
@@ -165,24 +165,24 @@ INVESTMENTS_SHEET = _SHEETS["investments_year_format"].format(year=INVESTMENTS_S
 PORTFOLIO_VALUE_RANGE = CONFIG["portfolio_value_range"]
 PORTFOLIO_CELL_MAP = [(c["isin"], c["label"]) for c in CONFIG["portfolio_cell_map"]]
 
-# Layouts soportados para Gastos/Ingresos:
-#   - "monthly_columns": meses como pares de columnas (Concepto+Importe). Default.
-#   - "ledger": una fila por evento con columnas Fecha/Concepto/Importe.
+# Supported layouts for Expenses/Income:
+#   - "monthly_columns": months as column pairs (Concept+Amount). Default.
+#   - "ledger": one row per event with Date/Concept/Amount columns.
 LAYOUT_DEFAULT = "monthly_columns"
 SUPPORTED_LAYOUTS = {"monthly_columns", "ledger"}
 LEDGER_HEADERS = list(_SHEETS.get("ledger_headers") or ["Fecha", "Concepto", "Importe"])
 
-# Columnas A1 donde escribir cada campo en el layout `ledger`. Defaults: A/B/C.
+# A1 columns where each field is written in the `ledger` layout. Defaults: A/B/C.
 _DEFAULT_LEDGER_COLUMNS = {"date": "A", "concept": "B", "amount": "C"}
 LEDGER_COLUMNS = {**_DEFAULT_LEDGER_COLUMNS, **(_SHEETS.get("ledger_columns") or {})}
 for _k, _v in LEDGER_COLUMNS.items():
     if not re.fullmatch(r"[A-Z]+", str(_v)):
         raise ValueError(
-            f"config.yaml > sheets.ledger_columns.{_k}='{_v}' debe ser una letra de columna A1 (A, B, ..., AA, ...)."
+            f"config.yaml > sheets.ledger_columns.{_k}='{_v}' must be an A1 column letter (A, B, ..., AA, ...)."
         )
 
-# Patrones de los headers de mes en `monthly_columns`. {month} se sustituye por
-# el nombre del mes (de MONTH_NAMES_ES) y {year} por el año.
+# Month-header patterns in `monthly_columns`. {month} is replaced with the
+# month name (from MONTH_NAMES_ES) and {year} with the year.
 MONTH_HEADER_AMOUNT = _SHEETS.get("month_header_amount", "{month} {year}")
 MONTH_HEADER_CONCEPT = _SHEETS.get("month_header_concept", "Concepto {month}")
 
@@ -191,8 +191,8 @@ INCOME_LAYOUT = _SHEETS.get("income_layout", LAYOUT_DEFAULT)
 for _name, _layout in [("expenses_layout", EXPENSES_LAYOUT), ("income_layout", INCOME_LAYOUT)]:
     if _layout not in SUPPORTED_LAYOUTS:
         raise ValueError(
-            f"config.yaml > sheets.{_name}='{_layout}' no soportado. "
-            f"Valores válidos: {sorted(SUPPORTED_LAYOUTS)}."
+            f"config.yaml > sheets.{_name}='{_layout}' not supported. "
+            f"Valid values: {sorted(SUPPORTED_LAYOUTS)}."
         )
 
 ASSET_NAME_MAP = CONFIG.get("asset_name_map", {})
@@ -200,33 +200,62 @@ STATUS_LABELS = CONFIG.get("status_labels", {"portfolio": "Portfolio", "sync": "
 
 DEFAULT_BUFFER_DAYS = int(CONFIG.get("default_buffer_days", 7))
 
-# Threshold (% del valor de posiciones) por encima del cual una posición se
-# marca como "alta concentración" en el bloque de insights. None = sin
-# threshold global; solo alertan los ISINs con entrada en concentration_limits.
+# Threshold (% of positions value) above which a position is flagged as
+# "high concentration" in the insights block. None = no global threshold;
+# only ISINs with an entry in concentration_limits trigger alerts.
 _threshold_raw = CONFIG.get("concentration_threshold", 0.35)
 CONCENTRATION_THRESHOLD = float(_threshold_raw) if _threshold_raw is not None else None
 
-# Límites individuales por ISIN (override del threshold global). Cada entrada
-# es {ISIN: float} con valor entre 0 y 1. ISINs sin entrada caen al threshold.
-# Permite definir tolerancias razonables por activo (SP500 alto, cripto bajo).
+# Per-ISIN individual limits (override of the global threshold). Each entry
+# is {ISIN: float} with a value between 0 and 1. ISINs without an entry fall
+# back to the threshold. Lets you set reasonable per-asset tolerances
+# (high for SP500, low for crypto).
 CONCENTRATION_LIMITS = {
     str(isin): float(limit)
     for isin, limit in (CONFIG.get("concentration_limits") or {}).items()
 }
 
-# ISIN del benchmark contra el que comparar tu MWR (p.ej. SP500 ETF). None =
-# bloque de benchmark deshabilitado en `make insights`.
+# ISIN of the benchmark to compare your MWR against (e.g. an SP500 ETF). None
+# = benchmark block disabled in `make insights`.
 BENCHMARK_ISIN = (CONFIG.get("benchmark_isin") or "").strip() or None
 BENCHMARK_LABEL = CONFIG.get("benchmark_label") or BENCHMARK_ISIN or "Benchmark"
 
-# Mapeo ISIN → divisa de denominación. Usado por el bloque de exposición por
-# divisa en `make insights`. ISINs sin entrada → "UNKNOWN".
+# ISIN → denomination currency mapping. Used by the currency exposure block
+# in `make insights`. ISINs without an entry → "UNKNOWN".
 ASSET_CURRENCIES = {
     str(isin): str(currency).upper()
     for isin, currency in (CONFIG.get("asset_currencies") or {}).items()
 }
 
-# Tipos de evento de TR (no van a config porque son de la API y no varían por usuario)
+# Declared monthly expense (€/m). Manual override for the "Cash runway"
+# block in `make insights`. Use when most spending does not flow through
+# the broker (so the WITHDRAWALs average understates real expenses).
+# None / 0 → fall back to a 6-month average of broker WITHDRAWALs.
+_monthly_expenses_raw = CONFIG.get("monthly_expenses_eur")
+MONTHLY_EXPENSES_EUR = float(_monthly_expenses_raw) if _monthly_expenses_raw else None
+
+# Declared monthly income (€/m). Manual override for the "Savings
+# efficiency" block. None / 0 → fall back to a 6-month gross average
+# of broker DEPOSITs (only meaningful if the user routes income through
+# the broker; otherwise set this field explicitly).
+_monthly_income_raw = CONFIG.get("monthly_income_eur")
+MONTHLY_INCOME_EUR = float(_monthly_income_raw) if _monthly_income_raw else None
+
+# Target cash range held at the broker (€), used by the "Cash target"
+# block to flag structural surplus (cash > max_eur) or shortfall
+# (cash < min_eur). Each bound accepts:
+#   - a scalar (constant value over time)
+#   - a dict {ISO_date: €} for a stepped schedule, resolved to the entry
+#     whose date is <= today (useful to raise the ceiling every N months
+#     without editing config by hand).
+# Either bound may be null/omitted; if both are missing the block is
+# skipped. Temporal resolution happens in cli/insights.py via
+# core.utils.resolve_dated_schedule.
+_cash_targets = CONFIG.get("cash_targets") or {}
+CASH_TARGET_MIN_SPEC = _cash_targets.get("min_eur")
+CASH_TARGET_MAX_SPEC = _cash_targets.get("max_eur")
+
+# TR event types (not in config — they come from the API and don't vary per user)
 EXPENSE_EVENT_TYPES = {
     "CARD_TRANSACTION",
     "PAYMENT_BIZUM_C2C_OUTGOING",
@@ -247,19 +276,19 @@ INVESTMENT_EVENT_TYPES = {
 
 EXCLUDED_STATUSES = {"CANCELED", "CANCELLED", "FAILED", "REJECTED", "PENDING"}
 
-# Label que se usa en la pestaña Inversiones para la fila de Saveback (eventos
-# SAVEBACK_AGGREGATE). Configurable.
+# Label used in the Investments tab for the Saveback row (SAVEBACK_AGGREGATE
+# events). Configurable.
 SAVEBACK_LABEL = CONFIG.get("saveback_label", "SAVEBACK")
 
-# Diccionario de traducciones alemán → idioma del usuario. Se mergea el default
-# con lo que el usuario haya puesto en config.yaml > subtitle_translations.
+# German → user-language translation dictionary. The default is merged with
+# whatever the user provides in config.yaml > subtitle_translations.
 SUBTITLE_TRANSLATIONS = {
     **_DEFAULT_SUBTITLE_TRANSLATIONS,
     **(CONFIG.get("subtitle_translations") or {}),
 }
 
-# Headers que `init-sheet` usa al crear pestañas vacías. Configurables para
-# que los usuarios en otros idiomas puedan tener "Asset", "Value (€)", etc.
+# Headers `init-sheet` uses when creating empty tabs. Configurable so users
+# in other languages can have "Asset", "Value (€)", etc.
 _DEFAULT_INIT_HEADERS = {
     "investments_asset_column": "Activo",
     "portfolio_asset_column": "Activo",
@@ -267,9 +296,9 @@ _DEFAULT_INIT_HEADERS = {
 }
 INIT_HEADERS = {**_DEFAULT_INIT_HEADERS, **(CONFIG.get("init_sheet_headers") or {})}
 
-# Patrones de eventos a ignorar (ej. la nómina que ya añades a mano).
-# Se cargan de config.yaml → ignore_events. Match case-insensitive y por
-# substring tanto sobre `title` como sobre `subtitle`.
+# Patterns of events to ignore (e.g. the salary you already add by hand).
+# Loaded from config.yaml → ignore_events. Case-insensitive substring match
+# against both `title` and `subtitle`.
 def _build_ignore_patterns(section):
     cfg = (CONFIG.get("ignore_events") or {}).get(section) or {}
     return {
@@ -278,7 +307,7 @@ def _build_ignore_patterns(section):
     }
 
 
-# Configuración por pestaña: filtro de eventos + marcadores del bloque resumen
+# Per-tab configuration: event filter + summary block markers
 SHEET_CONFIGS = {
     EXPENSES_SHEET: {
         "event_types": EXPENSE_EVENT_TYPES,
@@ -303,14 +332,14 @@ _DEFAULT_MONTH_NAMES = [
 MONTH_NAMES_ES = list(CONFIG.get("month_names") or _DEFAULT_MONTH_NAMES)
 if len(MONTH_NAMES_ES) != 12:
     raise ValueError(
-        f"config.yaml > month_names debe tener exactamente 12 elementos, "
-        f"recibidos {len(MONTH_NAMES_ES)}."
+        f"config.yaml > month_names must have exactly 12 elements, "
+        f"got {len(MONTH_NAMES_ES)}."
     )
 
-# ── Feature toggles (qué partes del sync se ejecutan) ─────────────────────
-# `FEATURES` es el dict que ya leían las funciones internas para los toggles
-# clásicos (expenses/income/investments/portfolio). Lo mantenemos por compat
-# y lo extendemos con el resto de features del registro.
+# ── Feature toggles (which parts of the sync run) ─────────────────────────
+# `FEATURES` is the dict the internal functions already read for the classic
+# toggles (expenses/income/investments/portfolio). Kept for compat and
+# extended with the rest of the registry's features.
 from brokers.tr import CAPABILITIES as BROKER_CAPABILITIES
 from core.features import (
     FEATURE_REGISTRY,
@@ -323,18 +352,18 @@ FEATURES = {**_FEATURES_DEFAULT, **(CONFIG.get("features") or {})}
 
 
 def is_feature_enabled(feature_name: str) -> bool:
-    """¿Está activa la feature? Combina config del usuario y capabilities del broker.
+    """Is the feature active? Combines the user's config and the broker's capabilities.
 
-    Wrapper sobre `core.features.is_feature_enabled` que ya tiene los datos del
-    broker activo (TR) preconfigurados.
+    Wrapper around `core.features.is_feature_enabled` that already has the
+    active broker (TR) data preconfigured.
     """
     return _is_feature_enabled_core(feature_name, BROKER_CAPABILITIES, FEATURES)
 
 
 def list_features():
-    """Imprime tabla de features con su estado (config + soporte broker)."""
+    """Print a table of features with their status (config + broker support)."""
     rows = _feature_status(BROKER_CAPABILITIES, FEATURES)
-    print(f"\n{'Feature':<22} {'Config':<8} {'Soporte':<9} {'Efectiva':<10} Descripción")
+    print(f"\n{'Feature':<22} {'Config':<8} {'Support':<9} {'Effective':<10} Description")
     print(f"{'-'*22} {'-'*8} {'-'*9} {'-'*10} {'-'*55}")
     for r in rows:
         cfg = "✓" if r["enabled_in_config"] else "✗"
@@ -342,15 +371,15 @@ def list_features():
         eff = "✓ ON" if r["effective"] else "✗ off"
         print(f"{r['name']:<22} {cfg:<8} {sup:<9} {eff:<10} {r['description']}")
     print()
-    print(f"Broker activo: TR ({len(BROKER_CAPABILITIES)} capabilities)")
+    print(f"Active broker: TR ({len(BROKER_CAPABILITIES)} capabilities)")
     print(f"Capabilities: {', '.join(sorted(BROKER_CAPABILITIES))}")
     print()
-    print("Para activar/desactivar features, edita config.yaml > features:")
+    print("To enable/disable features, edit config.yaml > features:")
     print("  features:")
-    print("    insights: false   # ej. apaga el comando insights")
+    print("    insights: false   # e.g. turn off the insights command")
     print()
 
-# ── Renta: secciones del informe a generar ────────────────────────────────
+# ── Renta: report sections to generate ────────────────────────────────────
 _RENTA_SECTIONS_DEFAULT = {
     "fifo": True,
     "dividends": True,
@@ -384,9 +413,9 @@ from brokers.tr.sync_io import (  # noqa: E402
 
 
 # ── Google Sheets ─────────────────────────────────────────────────────────
-# Las primitivas de Sheet (open, status, sync_state) viven en
-# `storage/sheets/*`. Aquí solo dejamos thin wrappers que aplican los
-# constantes/config de este módulo.
+# The Sheet primitives (open, status, sync_state) live in
+# `storage/sheets/*`. Here we only keep thin wrappers that apply the
+# constants/config of this module.
 
 from storage.sheets.client import open_spreadsheet as _open_spreadsheet
 from storage.sheets.status_store import StatusStore
@@ -406,7 +435,7 @@ def _sync_state_store(spreadsheet) -> SyncStateStore:
 
 
 def write_status(spreadsheet, key: str):
-    """Actualiza la pestaña STATUS_SHEET con el timestamp actual para `key`."""
+    """Update the STATUS_SHEET tab with the current timestamp for `key`."""
     _status_store(spreadsheet).write(key)
 
 
@@ -422,10 +451,10 @@ def append_synced_ids(spreadsheet, new_ids):
     _sync_state_store(spreadsheet).append(new_ids)
 
 
-# ── Snapshots históricos ──────────────────────────────────────────────────
-# Persistencia delegada a `storage.sheets.snapshot_store.SheetsSnapshotStore`.
-# La lógica pura (esquema, conversión a filas, snapshot_value_at) vive en
-# `core.snapshot_store`. tr_sync.py solo orquesta.
+# ── Historical snapshots ──────────────────────────────────────────────────
+# Persistence delegated to `storage.sheets.snapshot_store.SheetsSnapshotStore`.
+# Pure logic (schema, row conversion, snapshot_value_at) lives in
+# `core.snapshot_store`. tr_sync.py only orchestrates.
 
 from core.cache import (
     invalidate_cache as _invalidate_tr_cache,
@@ -441,16 +470,16 @@ def _ensure_tr_session(
     refresh: bool = False,
     benchmark_isins: tuple[str, ...] = (),
 ):
-    """Devuelve (snapshot, txs, benchmarks), usando el cache de TR si está fresco.
+    """Return (snapshot, txs, benchmarks), using the TR cache if fresh.
 
-    `refresh=True` invalida el cache y fuerza un fetch limpio.
-    `benchmark_isins`: ISINs para los que descargar histórico de precios. Si
-    el cache no los contiene todos, se hace refetch.
+    `refresh=True` invalidates the cache and forces a clean fetch.
+    `benchmark_isins`: ISINs to download price history for. If the cache
+    doesn't contain all of them, a refetch is triggered.
 
-    Si el cache está fresco y contiene los benchmarks pedidos, evita por
-    completo el `login()` y la descarga.
+    If the cache is fresh and contains the requested benchmarks, this
+    avoids `login()` and the download entirely.
 
-    `benchmarks` es `{ISIN: price_history_list}` solo para los ISINs solicitados.
+    `benchmarks` is `{ISIN: price_history_list}` for the requested ISINs only.
     """
     from brokers.tr.adapter import fetch_price_history, fetch_snapshot, fetch_transactions
 
@@ -458,29 +487,29 @@ def _ensure_tr_session(
         cached = _load_cached_tr(CACHE_PATH)
         if cached:
             snapshot, txs, cached_benchmarks = cached
-            # Si todos los benchmarks pedidos están en cache, usamos cache.
-            # Si falta alguno, hacemos refetch para incluirlo.
+            # If all requested benchmarks are in the cache, use the cache.
+            # If any is missing, refetch to include it.
             if all(isin in cached_benchmarks for isin in benchmark_isins):
-                # Filtramos solo los pedidos (no devolvemos benchmarks viejos no solicitados).
+                # Return only the requested ones (don't surface old, unrequested benchmarks).
                 benchmarks = {isin: cached_benchmarks[isin] for isin in benchmark_isins}
                 return snapshot, txs, benchmarks
 
-    log.info("Conectando a Trade Republic...")
+    log.info("Connecting to Trade Republic...")
     tr = login()
-    log.info("Descargando snapshot y transacciones...")
+    log.info("Downloading snapshot and transactions...")
 
     async def _gather():
         snap = await fetch_snapshot(tr, tz=TIMEZONE)
         txs_local = await fetch_transactions(tr, tz=TIMEZONE, gift_overrides=GIFT_COST_OVERRIDES)
         bench = {}
         for isin in benchmark_isins:
-            log.info(f"   descargando histórico benchmark {isin}...")
+            log.info(f"   downloading benchmark history {isin}...")
             history = await fetch_price_history(tr, isin, range_str="max")
             if history:
                 bench[isin] = history
-                log.info(f"      {len(history)} barras")
+                log.info(f"      {len(history)} bars")
             else:
-                log.warning(f"      ⚠ no se pudo descargar histórico para {isin}")
+                log.warning(f"      ⚠ could not download history for {isin}")
         return snap, txs_local, bench
 
     snapshot, txs, benchmarks = asyncio.run(_gather())
@@ -500,10 +529,10 @@ def _make_snapshot_store(spreadsheet) -> SheetsSnapshotStore:
 
 
 
-# ── Orquestación ──────────────────────────────────────────────────────────
+# ── Orchestration ─────────────────────────────────────────────────────────
 
-# Helpers movidos a core/utils.py — re-exportados aquí con prefix `_` por
-# compatibilidad con código existente (tests, llamadas externas).
+# Helpers moved to core/utils.py — re-exported here with `_` prefix for
+# compatibility with existing code (tests, external calls).
 from core.utils import (
     column_letter_to_index as _column_letter_to_index,
     parse_a1_column_range as _parse_a1_column_range,
@@ -528,19 +557,20 @@ from core.investments import (  # noqa: E402
 # main() imports them lazily so we avoid an import cycle (cli/* import from tr_sync).
 
 
-# ── Informe IRPF (FIFO) — movido a reports/renta_es.py ────────────────────
-# La lógica del informe IRPF español vive en `reports/renta_es.py` (~600 líneas
-# extraídas para mantener `tr_sync.py` enfocado en sync/orquestación). Aquí
-# solo dejamos las constantes config-derivadas (DIVIDEND_SUBTITLES, etc.) que
-# `reports/renta_es.py` referencia vía `tr_sync.X`, más shims de compat para
-# los tests existentes.
+# ── IRPF report (FIFO) — moved to reports/renta_es.py ─────────────────────
+# The Spanish IRPF report logic lives in `reports/renta_es.py` (~600 lines
+# extracted to keep `tr_sync.py` focused on sync/orchestration). Here we
+# only keep the config-derived constants (DIVIDEND_SUBTITLES, etc.) that
+# `reports/renta_es.py` references via `tr_sync.X`, plus compat shims for
+# the existing tests.
 
-# Override manual para regalos cuyos detalles TR no traiga parseables.
-# Se configura en config.yaml → gift_cost_overrides.
+# Manual override for gifts whose details TR does not return parseable.
+# Configured via config.yaml → gift_cost_overrides.
 GIFT_COST_OVERRIDES: dict = CONFIG.get("gift_cost_overrides") or {}
 
-# Subtitles alemanes con los que TR clasifica eventos SSP_CORPORATE_ACTION_CASH.
-# Si TR introduce un subtitle nuevo, el usuario puede ampliarlo via config sin tocar código.
+# German subtitles TR uses to classify SSP_CORPORATE_ACTION_CASH events.
+# If TR introduces a new subtitle, the user can extend it via config without
+# touching code.
 _DEFAULT_DIVIDEND_SUBTITLES = {"Bardividende", "Aktienprämiendividende", "Kapitalertrag"}
 _DEFAULT_BOND_CASH_SUBTITLES = {"Zinszahlung", "Kupon"}
 _DEFAULT_BOND_MATURITY_SUBTITLES = {"Endgültige Fälligkeit"}
@@ -553,10 +583,10 @@ BOND_SUBTITLES = BOND_CASH_SUBTITLES | BOND_MATURITY_SUBTITLES
 CRYPTO_ISINS = set(CONFIG.get("crypto_isins", []))
 
 
-# ── Backward-compat shims para tests ──────────────────────────────────────
-# Los tests existentes importan estos símbolos desde `tr_sync`. Re-exportamos
-# desde sus nuevas ubicaciones. La importación es lazy (dentro de funciones)
-# para evitar el ciclo `tr_sync ↔ reports.renta_es`.
+# ── Backward-compat shims for tests ───────────────────────────────────────
+# Existing tests import these symbols from `tr_sync`. We re-export them
+# from their new locations. The import is lazy (inside functions) to avoid
+# the `tr_sync ↔ reports.renta_es` cycle.
 
 from core.utils import parse_de_number as _parse_de_number
 from core.fifo import apply_fifo as _apply_fifo
@@ -569,7 +599,7 @@ from brokers.tr.parser import (
 
 
 def _build_lots_and_sales(events, target_year):
-    """Compat shim — la lógica vive en `reports.renta_es._build_lots_and_sales`."""
+    """Compat shim — the logic lives in `reports.renta_es._build_lots_and_sales`."""
     from reports.renta_es import _build_lots_and_sales as _real
     return _real(events, target_year)
 
@@ -601,42 +631,42 @@ def _retentions_by_country(dividends):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--dry-run", action="store_true", help="No escribe en la Sheet")
-    p.add_argument("--since", type=str, help="Fecha ISO (e.g. 2026-04-19) para filtrar")
+    p.add_argument("--dry-run", action="store_true", help="Don't write to the Sheet")
+    p.add_argument("--since", type=str, help="ISO date (e.g. 2026-04-19) to filter from")
     p.add_argument("--init", action="store_true",
-                   help="Marca todos los eventos actuales como ya sincronizados sin escribir")
+                   help="Mark every current event as already synced without writing")
     p.add_argument("--portfolio", action="store_true",
-                   help="Solo snapshot del portfolio (valor actual por activo). Con --dry-run, imprime ISINs sin escribir")
+                   help="Just the portfolio snapshot (current value per asset). With --dry-run, prints ISINs without writing")
     p.add_argument("--renta", action="store_true",
-                   help="Informe IRPF de ganancias/pérdidas patrimoniales (FIFO). Usa --year para fijar año.")
+                   help="IRPF report of capital gains/losses (FIFO). Use --year to set the year.")
     p.add_argument("--year", type=int, default=None,
-                   help="Año fiscal para --renta (default: año actual - 1)")
+                   help="Fiscal year for --renta (default: current year - 1)")
     p.add_argument("--init-sheet", action="store_true",
-                   help="Crea las pestañas que faltan en tu Google Sheet con la estructura mínima.")
+                   help="Create the missing tabs in your Google Sheet with the minimum schema.")
     p.add_argument("--doctor", action="store_true",
-                   help="Verifica que el setup está listo: config, OAuth, Sheet, pestañas, sesión pytr.")
+                   help="Verify the setup is ready: config, OAuth, Sheet, tabs, pytr session.")
     p.add_argument("--insights", action="store_true",
-                   help="Imprime patrimonio, aportaciones y rentabilidad (simple + MWR) en consola. No toca la Sheet.")
+                   help="Print net worth, contributions and return (simple + MWR) to the console. Does not touch the Sheet.")
     p.add_argument("--verbose", action="store_true",
-                   help="Con --insights, añade el bloque POR POSICIÓN para diagnóstico.")
+                   help="With --insights, add the PER POSITION block for diagnosis.")
     p.add_argument("--debug-isin", type=str, metavar="ISIN",
-                   help="Lista todas las transacciones que el adapter saca para un ISIN concreto. Útil para reconciliar con Excel.")
+                   help="List every transaction the adapter extracts for a specific ISIN. Useful to reconcile with Excel.")
     p.add_argument("--mwr-flows", action="store_true",
-                   help="Vuelca los flujos que `mwr()` usa al stdout en TSV. Pega en Sheets y aplica =XIRR para sanity check.")
+                   help="Dumps the flows used by `mwr()` to stdout as TSV. Paste into Sheets and apply =XIRR as a sanity check.")
     p.add_argument("--bonus-as", type=str, default="income", choices=["income", "deposit"],
-                   help="Modo de tratamiento del saveback en --mwr-flows (default income).")
+                   help="Saveback handling mode in --mwr-flows (default income).")
     p.add_argument("--locale", type=str, default="us", choices=["us", "es"],
-                   help="Formato decimal en --mwr-flows: 'us' (1234.56, default) o 'es' (1234,56).")
+                   help="Decimal format in --mwr-flows: 'us' (1234.56, default) or 'es' (1234,56).")
     p.add_argument("--backfill-snapshots", action="store_true",
-                   help="Reconstruye snapshots históricos vía TR aggregateHistory y los escribe en `_snapshots`.")
+                   help="Reconstruct historical snapshots via TR aggregateHistory and write them to `_snapshots`.")
     p.add_argument("--start", type=str, default=None, metavar="YYYY-MM-DD",
-                   help="Con --backfill-snapshots: fecha de inicio (default: today − 365d).")
+                   help="With --backfill-snapshots: start date (default: today − 365d).")
     p.add_argument("--frequency", type=str, default="weekly", choices=["weekly", "biweekly", "monthly"],
-                   help="Con --backfill-snapshots: cadencia (default: weekly).")
+                   help="With --backfill-snapshots: cadence (default: weekly).")
     p.add_argument("--features", action="store_true",
-                   help="Imprime tabla de features con su estado (config + soporte broker).")
+                   help="Print the features table with their status (config + broker support).")
     p.add_argument("--refresh", action="store_true",
-                   help="Invalida el cache de TR y fuerza un fetch limpio (útil si TR ha emitido nuevos eventos).")
+                   help="Invalidate the TR cache and force a clean fetch (useful when TR has emitted new events).")
     args = p.parse_args()
     since = None
     if args.since:
@@ -673,7 +703,7 @@ def main():
             from cli.sync_cmd import sync
             sync(dry_run=args.dry_run, since=since, init_mode=args.init)
     except KeyboardInterrupt:
-        log.info("\nInterrumpido.")
+        log.info("\nInterrupted.")
         sys.exit(130)
 
 

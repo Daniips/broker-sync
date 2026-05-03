@@ -175,7 +175,7 @@ class ExtractTradeDetailsTests(unittest.TestCase):
         self.assertEqual(d, {"isin": None, "shares": None, "unit_price": None})
 
     def test_extracts_from_trade_invoice_format(self):
-        # formato TRADE_INVOICE: sección propia 'Transaktion' con filas Anteile/Aktienkurs
+        # TRADE_INVOICE format: own 'Transaktion' section with Anteile/Aktienkurs rows
         raw = {
             "eventType": "TRADE_INVOICE",
             "details": {"sections": [
@@ -306,7 +306,7 @@ class ExtractGiftDetailsTests(unittest.TestCase):
         self.assertEqual(d["isin"], "US88160R1014")
 
     def test_isin_extracted_from_header_data_icon_when_root_is_generic(self):
-        # formato GIFTING_RECIPIENT_ACTIVITY: root icon='logos/timeline_gift/v2' genérico
+        # GIFTING_RECIPIENT_ACTIVITY format: root icon='logos/timeline_gift/v2' generic
         raw = {
             "eventType": "GIFTING_RECIPIENT_ACTIVITY",
             "icon": "logos/timeline_gift/v2",
@@ -345,7 +345,7 @@ class GiftAsBuyLotIntegrationTests(unittest.TestCase):
         self.assertEqual(skipped, [])
 
     def test_gift_fifo_end_to_end(self):
-        # Tesla regalo 2.00€ + venta 0.49€ → pérdida 1.51€
+        # Tesla gift 2.00€ + sale 0.49€ → loss 1.51€
         gift = _gift_event()
         sell = _trade_event(
             eventType="TRADING_TRADE_EXECUTED",
@@ -492,7 +492,7 @@ class InterestCollectionTests(unittest.TestCase):
         events = [
             self._interest_event(ts="2025-01-01T00:00:00+0000", amount=10.0),
             self._interest_event(ts="2025-02-01T00:00:00+0000", amount=5.50),
-            self._interest_event(ts="2024-12-01T00:00:00+0000", amount=3.0),  # año distinto
+            self._interest_event(ts="2024-12-01T00:00:00+0000", amount=3.0),  # different year
         ]
         out = tr_sync._collect_interest(events, year=2025)
         self.assertEqual(len(out), 2)
@@ -535,7 +535,7 @@ class BondIncomeCollectionTests(unittest.TestCase):
         }
 
     def test_real_bond_flow_computes_net_yield(self):
-        # Reproducir el caso real del usuario: compra 2000,99 + cupón 106,07 + amortiz. 1928,51
+        # Reproduce the user's real case: buy 2000.99 + coupon 106.07 + maturity 1928.51
         events = [
             self._bond_buy_event(-2000.99),
             self._bond_income_event("Zinszahlung", 106.07),
@@ -699,9 +699,9 @@ class LedgerLayoutTests(unittest.TestCase):
         )
         ss = self._make_spreadsheet(ws)
         tr_sync._sync_ledger_layout(ss, tr_sync.EXPENSES_SHEET, [self._make_tx(1)], dry_run=False)
-        # Headers ya están: no se llama update_cell
+        # Headers already present: update_cell is not called
         self.assertEqual(ws.update_cell_calls, [])
-        # Sí se escriben los datos vía update_cells
+        # Data is written via update_cells
         self.assertEqual(len(ws.update_cells_calls), 1)
 
     def test_ledger_appends_after_existing_rows(self):
@@ -711,7 +711,7 @@ class LedgerLayoutTests(unittest.TestCase):
         )
         ss = self._make_spreadsheet(ws)
         tr_sync._sync_ledger_layout(ss, tr_sync.EXPENSES_SHEET, [self._make_tx(1)], dry_run=False)
-        # Próxima fila libre = 4. Verificamos que las celdas escritas están en fila 4.
+        # Next empty row = 4. Verify the written cells are in row 4.
         cells = ws.update_cells_calls[0]
         rows_written = {c.row for c in cells}
         self.assertEqual(rows_written, {4})
@@ -734,7 +734,7 @@ class LedgerLayoutTests(unittest.TestCase):
         ]
         ids = tr_sync._sync_ledger_layout(ss, tr_sync.EXPENSES_SHEET, txs, dry_run=False)
         self.assertEqual(ids, ["tx-2", "tx-3", "tx-1"])
-        # Inspeccionamos las celdas: ordenadas por fila ascendente, las dates aumentan
+        # Inspect the cells: sorted by row ascending, dates increase
         cells = ws.update_cells_calls[-1]
         date_col_idx = tr_sync._column_letter_to_index(tr_sync.LEDGER_COLUMNS["date"])
         date_cells = sorted([c for c in cells if c.col == date_col_idx], key=lambda c: c.row)
@@ -742,10 +742,10 @@ class LedgerLayoutTests(unittest.TestCase):
 
 
 class LedgerCustomColumnsTests(unittest.TestCase):
-    """Verifica que LEDGER_COLUMNS funciona con columnas no-default (no A/B/C)."""
+    """Verify that LEDGER_COLUMNS works with non-default columns (not A/B/C)."""
 
     def setUp(self):
-        # Salvar y monkeypatch LEDGER_COLUMNS para B/D/F (columnas no contiguas)
+        # Save and monkeypatch LEDGER_COLUMNS to B/D/F (non-contiguous columns)
         self._saved = dict(tr_sync.LEDGER_COLUMNS)
         tr_sync.LEDGER_COLUMNS = {"date": "B", "concept": "D", "amount": "F"}
 
@@ -789,17 +789,17 @@ class LedgerCustomColumnsTests(unittest.TestCase):
     def test_writes_to_configured_columns_not_abc(self):
         ws, ss = self._make_ws_and_ss()
         tr_sync._sync_ledger_layout(ss, tr_sync.EXPENSES_SHEET, [self._make_tx()], dry_run=False)
-        # Headers escritos en columnas 2, 4, 6
+        # Headers written in columns 2, 4, 6
         cols_written = {c for _, c, _ in ws.update_cell_calls}
         self.assertEqual(cols_written, {2, 4, 6})
-        # Datos también escritos en esas mismas columnas
+        # Data also written in those same columns
         cells = ws.update_cells_calls[0]
         self.assertEqual({c.col for c in cells}, {2, 4, 6})
-        # Ninguna celda escrita en col A
+        # No cell written in col A
         self.assertNotIn(1, {c.col for c in cells})
 
     def test_first_empty_row_uses_date_column_not_col_a(self):
-        # col B (date) tiene 5 valores → próxima fila libre = 6
+        # col B (date) has 5 values → next empty row = 6
         ws, ss = self._make_ws_and_ss(
             col_values={2: ["Fecha", "2026-04-10", "2026-04-11", "2026-04-12", "2026-04-13"]},
             row1=["", "Fecha", "", "Concepto", "", "Importe"],
@@ -811,7 +811,7 @@ class LedgerCustomColumnsTests(unittest.TestCase):
 
 
 class MonthHeaderFormatTests(unittest.TestCase):
-    """Verifica que los patrones MONTH_HEADER_AMOUNT/CONCEPT son configurables."""
+    """Verify that the MONTH_HEADER_AMOUNT/CONCEPT patterns are configurable."""
 
     def test_default_format_is_spanish(self):
         self.assertEqual(tr_sync.MONTH_HEADER_AMOUNT, "{month} {year}")

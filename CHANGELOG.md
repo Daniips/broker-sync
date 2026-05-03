@@ -1,143 +1,143 @@
 # Changelog
 
-Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y [SemVer](https://semver.org/spec/v2.0.0.html).
+Follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added — Investment insights & analytics
 
-- **`make insights`** (`tr_sync.py --insights`): consola con patrimonio, rentabilidad y aportaciones. No toca la Sheet (excepto los `_snapshots` ocultos). Bloques:
-  - Patrimonio actual: ETFs/acciones, cripto, cash, total (separados como en TR app).
-  - Rentabilidad: cost basis sin/con saveback, plusvalía sobre dinero propio (matchea Excel y TR app), plusvalía sobre cost basis bruto.
-  - Rentabilidad histórica: aportado neto + MWR (XIRR) all-time, YTD y 12 meses anualizado, en dos modos (saveback como income vs como aportación).
-  - Aportaciones mensuales: este mes vs media de los últimos 12m, con `Δ vs media`.
-  - Concentración: distribución por posición con bar chart + alerta `⚠ alta` si una posición supera el threshold (configurable, default 35%).
-- **`make backfill-snapshots`** (`tr_sync.py --backfill-snapshots`): reconstruye snapshots históricos vía `aggregateHistoryLight` de TR. Soporta `--start YYYY-MM-DD` y `--frequency weekly|biweekly|monthly`. Desbloquea MWR YTD/12m sin esperar a acumular semanas.
-- **`make features`** (`tr_sync.py --features`): tabla con todas las features del producto, su estado en config y el soporte del broker activo.
-- **`tr_sync.py --debug-isin ISIN`**: lista todas las transacciones que el adapter saca para un ISIN concreto. Útil para reconciliar contra fuentes externas (Excel manual).
+- **`make insights`** (`tr_sync.py --insights`): console output with net worth, returns, and contributions. Doesn't touch the Sheet (except the hidden `_snapshots` tabs). Blocks:
+  - Current net worth: ETFs/stocks, crypto, cash, total (separated as in the TR app).
+  - Returns: cost basis without/with saveback, unrealized return on your own money (matches Excel and the TR app), unrealized return on gross cost basis.
+  - Historical returns: net contributed + MWR (XIRR) all-time, YTD and trailing 12 months annualized, in two modes (saveback as income vs as contribution).
+  - Monthly contributions: this month vs the average of the last 12 months, with `Δ vs average`.
+  - Concentration: per-position distribution with bar chart + `⚠ alta` alert if any position exceeds the threshold (configurable, default 35%).
+- **`make backfill-snapshots`** (`tr_sync.py --backfill-snapshots`): reconstructs historical snapshots via TR's `aggregateHistoryLight`. Supports `--start YYYY-MM-DD` and `--frequency weekly|biweekly|monthly`. Unlocks YTD/12m MWR without waiting for snapshots to accumulate.
+- **`make features`** (`tr_sync.py --features`): table with all product features, their config status, and the active broker's support.
+- **`tr_sync.py --debug-isin ISIN`**: lists every transaction the adapter extracts for a given ISIN. Useful to reconcile against external sources (manual Excel).
 
 ### Added — Architecture
 
-- **`core/types.py`**: modelo agnóstico de broker (Transaction, Position, PortfolioSnapshot, TxKind). Frozen dataclasses con convención de signos documentada y campos para `is_bonus`, `from_cash`, `cost_basis_eur`, `exchange_id`.
-- **`core/metrics.py`**: funciones puras sobre el modelo agnóstico — `xirr`, `mwr`, `simple_return`, `unrealized_return`, `unrealized_return_user_paid`, `cost_basis_user_paid_per_isin`, `concentration`, `monthly_contributions`, `contribution_vs_average`.
-- **`core/backfill.py`**: reconstrucción histórica pura — `shares_at`, `cash_at`, `reconstruct_snapshot_at`. No I/O.
-- **`core/snapshot_store.py`**: protocolo `SnapshotStore` + esquema y conversión pura `snapshot_to_rows` + helper `snapshot_value_at`.
-- **`core/features.py`**: registro `FEATURE_REGISTRY` con cada feature y sus capabilities requeridas. Funciones `is_feature_enabled`, `is_feature_supported`, `feature_status`.
-- **`brokers/tr/__init__.py`**: declara `CAPABILITIES` (set de strings) que TR soporta. Otros brokers exportarán su set propio.
-- **`brokers/tr/adapter.py`**: `fetch_transactions`, `fetch_snapshot`, `fetch_price_history`, `fetch_price_history_with_fallback` (prueba múltiples exchanges para ISINs cripto), `raw_event_to_tx`. Mapea event types de TR a `TxKind`. Marca saveback (`is_bonus=True`, `from_cash=False`) y regalos (`is_bonus=False`, `from_cash=False`).
-- **`storage/sheets/`**: implementaciones backend-específicas para Google Sheets — `client.py` (open_spreadsheet), `status_store.py` (StatusStore), `sync_state_store.py` (SyncStateStore dedup), `snapshot_store.py` (SheetsSnapshotStore agregado + por posición).
-- **Pestañas ocultas nuevas** en la Sheet:
-  - `_snapshots`: una fila por snapshot con `ts | cash_eur | positions_value_eur | cost_basis_eur | total_eur`. Append automático en cada `make insights / portfolio` y en backfill.
-  - `_snapshots_positions`: una fila por (snapshot, posición) con `ts | isin | title | shares | net_value_eur | cost_basis_eur` para evolución por activo.
+- **`core/types.py`**: broker-agnostic model (Transaction, Position, PortfolioSnapshot, TxKind). Frozen dataclasses with documented sign convention and fields for `is_bonus`, `from_cash`, `cost_basis_eur`, `exchange_id`.
+- **`core/metrics.py`**: pure functions over the agnostic model — `xirr`, `mwr`, `simple_return`, `unrealized_return`, `unrealized_return_user_paid`, `cost_basis_user_paid_per_isin`, `concentration`, `monthly_contributions`, `contribution_vs_average`.
+- **`core/backfill.py`**: pure historical reconstruction — `shares_at`, `cash_at`, `reconstruct_snapshot_at`. No I/O.
+- **`core/snapshot_store.py`**: `SnapshotStore` protocol + schema and pure conversion `snapshot_to_rows` + helper `snapshot_value_at`.
+- **`core/features.py`**: `FEATURE_REGISTRY` registry with each feature and its required capabilities. Functions `is_feature_enabled`, `is_feature_supported`, `feature_status`.
+- **`brokers/tr/__init__.py`**: declares the `CAPABILITIES` (set of strings) that TR supports. Other brokers will export their own set.
+- **`brokers/tr/adapter.py`**: `fetch_transactions`, `fetch_snapshot`, `fetch_price_history`, `fetch_price_history_with_fallback` (tries multiple exchanges for crypto ISINs), `raw_event_to_tx`. Maps TR event types to `TxKind`. Marks saveback (`is_bonus=True`, `from_cash=False`) and gifts (`is_bonus=False`, `from_cash=False`).
+- **`storage/sheets/`**: backend-specific implementations for Google Sheets — `client.py` (open_spreadsheet), `status_store.py` (StatusStore), `sync_state_store.py` (SyncStateStore dedup), `snapshot_store.py` (SheetsSnapshotStore aggregated + per position).
+- **New hidden tabs** in the Sheet:
+  - `_snapshots`: one row per snapshot with `ts | cash_eur | positions_value_eur | cost_basis_eur | total_eur`. Automatic append on each `make insights / portfolio` and on backfill.
+  - `_snapshots_positions`: one row per (snapshot, position) with `ts | isin | title | shares | net_value_eur | cost_basis_eur` for per-asset evolution.
 
 ### Added — Config
 
-- **`features.{insights, concentration, snapshot_persist, backfill_snapshots, saveback_metrics, ...}`**: toggles individuales por feature. La feature se desactiva tanto si el config la apaga como si el broker no la soporta.
-- **`concentration_threshold`** (default 0.35): % a partir del cual una posición se marca como "alta concentración" en el bloque correspondiente.
-- **`sheets.snapshots`** (default `"_snapshots"`) y **`sheets.snapshots_positions`** (default `"_snapshots_positions"`): nombres de las pestañas ocultas para histórico.
+- **`features.{insights, concentration, snapshot_persist, backfill_snapshots, saveback_metrics, ...}`**: individual toggles per feature. The feature is disabled either if the config turns it off or if the broker doesn't support it.
+- **`concentration_threshold`** (default 0.35): % above which a position is flagged as "high concentration" in the corresponding block.
+- **`sheets.snapshots`** (default `"_snapshots"`) and **`sheets.snapshots_positions`** (default `"_snapshots_positions"`): names of the hidden tabs for history.
 
 ### Changed
 
 - Repo renamed from `tr-sync` to `broker-sync` to reflect future multi-broker support. URL: https://github.com/Daniips/broker-sync.
-- Refactored to a modular layout: `core/` (puro), `brokers/<x>/` (data sources), `storage/<backend>/` (sinks). `tr_sync.py` baja a ~2270 líneas (pre-refactor: ~2400).
-- Code comments and docstrings in `core/`, `brokers/`, `storage/` are bilingual (English + Spanish).
-- `ARCHITECTURE.md` reescrito reflejando la estructura actual y el patrón core/brokers/storage.
+- Refactored to a modular layout: `core/` (pure), `brokers/<x>/` (data sources), `storage/<backend>/` (sinks). `tr_sync.py` drops to ~2270 lines (pre-refactor: ~2400).
+- Code comments and docstrings in `core/`, `brokers/`, `storage/` are in English.
+- `ARCHITECTURE.md` rewritten to reflect the current structure and the core/brokers/storage pattern.
 
 ### Changed — `sync_renta` extracted to `reports/renta_es.py`
 
-- ~600 líneas de lógica IRPF española movidas a `reports/renta_es.py`. `tr_sync.py` baja de ~2380 a ~1925 líneas (-455).
-- Constantes config-derivadas (`DIVIDEND_SUBTITLES`, `BOND_*_SUBTITLES`, `GIFT_COST_OVERRIDES`, `CRYPTO_ISINS`) se quedan en `tr_sync.py` y `reports.renta_es` las referencia vía `tr_sync.X`.
-- Shims de compat en `tr_sync.py` (`_collect_*`, `_build_lots_and_sales`, `_retentions_by_country`) para que tests existentes y consumidores externos no rompan. Lazy import desde el shim → cero ciclo de imports.
-- Nueva carpeta `reports/` para futuros regímenes fiscales (UK ISA, DE Steuerbericht, PT IRS, etc.) — cada uno como módulo hermano consumiendo `core.fifo` y `brokers/tr/parser.py`.
+- ~600 lines of Spanish IRPF logic moved to `reports/renta_es.py`. `tr_sync.py` drops from ~2380 to ~1925 lines (-455).
+- Config-derived constants (`DIVIDEND_SUBTITLES`, `BOND_*_SUBTITLES`, `GIFT_COST_OVERRIDES`, `CRYPTO_ISINS`) stay in `tr_sync.py` and `reports.renta_es` references them via `tr_sync.X`.
+- Compat shims in `tr_sync.py` (`_collect_*`, `_build_lots_and_sales`, `_retentions_by_country`) so existing tests and external consumers don't break. Lazy import from the shim → zero import cycle.
+- New `reports/` folder for future tax regimes (UK ISA, DE Steuerbericht, PT IRS, etc.) — each as a sibling module consuming `core.fifo` and `brokers/tr/parser.py`.
 
-### Added — Performance attribution per posición
+### Added — Performance attribution per position
 
-- **`core.metrics.per_position_attribution()`**: para cada posición viva, calcula su MWR individual (XIRR sobre los flujos del ISIN: BUYs, SELLs, DIVIDENDs + valor actual) y su contribución ponderada al rendimiento de la cartera (`MWR × value_pct`).
-- **Bloque "ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN"** en `make insights`. Tabla ordenada por contribución absoluta. Muestra qué posiciones llevan el peso del rendimiento y cuáles arrastran.
-- 4 tests nuevos en `test_metrics.py`.
+- **`core.metrics.per_position_attribution()`**: for each live position, computes its individual MWR (XIRR over the ISIN's flows: BUYs, SELLs, DIVIDENDs + current value) and its weighted contribution to portfolio return (`MWR × value_pct`).
+- **"PERFORMANCE ATTRIBUTION PER POSITION" block** in `make insights`. Table sorted by absolute contribution. Shows which positions drive the return and which drag.
+- 4 new tests in `test_metrics.py`.
 
 ### Added — Benchmark comparison
 
-- **`benchmark_isin`** y **`benchmark_label`** (config nuevo): activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. Compara tu MWR (modo income) contra rendimiento anualizado del benchmark en all-time / YTD / 12m con Δ en pp.
-- **`core.metrics.benchmark_return()`**: función pura que calcula el rendimiento anualizado de un benchmark entre dos fechas a partir de su histórico de precios.
-- **Cache extendido** (`core.cache.py` v2): `(snapshot, txs, benchmarks)` en vez de solo `(snapshot, txs)`. Una sola login + descarga por sesión, también para benchmarks. Versión bumpeada para invalidar caches antiguos automáticamente.
-- 6 tests nuevos en `test_metrics.py` para `benchmark_return` (incluyendo periodos cortos extrapolados, retornos negativos, edge cases).
+- **`benchmark_isin`** and **`benchmark_label`** (new config): activates the "RETURN VS BENCHMARK" block in `make insights`. Compares your MWR (income mode) against the benchmark's annualized return over all-time / YTD / 12m with Δ in pp.
+- **`core.metrics.benchmark_return()`**: pure function that computes the annualized return of a benchmark between two dates from its price history.
+- **Extended cache** (`core.cache.py` v2): `(snapshot, txs, benchmarks)` instead of just `(snapshot, txs)`. A single login + download per session, also for benchmarks. Version bumped to invalidate old caches automatically.
+- 6 new tests in `test_metrics.py` for `benchmark_return` (including extrapolated short periods, negative returns, edge cases).
 
 ### Added — Currency exposure & MWR sanity export
 
-- **`asset_currencies`** (config nuevo): dict `{ISIN: divisa}`. Activa el bloque "EXPOSICIÓN POR DIVISA" en `make insights` que agrupa el patrimonio total (cash + posiciones) por divisa de denominación. ISINs sin entrada van a "UNKNOWN".
-- **`core.metrics.currency_exposure()`**: función pura agnóstica de broker.
-- **`make mwr-flows`** (`tr_sync.py --mwr-flows [--bonus-as deposit]`): exporta los flujos de caja del MWR en TSV para que pegues en Sheets/Excel y verifiques con `=XIRR` nativo. Útil como sanity check del MWR all-time.
-- 3 tests nuevos en `test_metrics.py` para currency exposure.
+- **`asset_currencies`** (new config): dict `{ISIN: currency}`. Activates the "CURRENCY EXPOSURE" block in `make insights` that groups total net worth (cash + positions) by denomination currency. ISINs without an entry go to "UNKNOWN".
+- **`core.metrics.currency_exposure()`**: pure broker-agnostic function.
+- **`make mwr-flows`** (`tr_sync.py --mwr-flows [--bonus-as deposit]`): exports MWR cash flows in TSV so you can paste into Sheets/Excel and verify with native `=XIRR`. Useful as a sanity check of all-time MWR.
+- 3 new tests in `test_metrics.py` for currency exposure.
 
-### Added — Solana en backfill
+### Added — Solana in backfill
 
-- **TR expone Solana en exchange `BHS`** (Bitstamp Handelssystem). El campo viene en `compactPortfolio.exchangeIds`, ya capturado por el adapter desde el refactor anterior.
-- **`fetch_instrument_exchanges()`** en el adapter TR: consulta `instrument_details(isin)` para descubrir exchanges no hardcoded. Usado como último fallback en `fetch_price_history_with_fallback`.
-- **Determinismo en backfill**: timestamps normalizados a `T12:00:00`. Re-ejecutar `make backfill-snapshots` ya no genera filas duplicadas (dedup por ts ahora funciona).
+- **TR exposes Solana on exchange `BHS`** (Bitstamp Handelssystem). The field comes from `compactPortfolio.exchangeIds`, already captured by the adapter since the previous refactor.
+- **`fetch_instrument_exchanges()`** in the TR adapter: queries `instrument_details(isin)` to discover non-hardcoded exchanges. Used as the last fallback in `fetch_price_history_with_fallback`.
+- **Determinism in backfill**: timestamps normalized to `T12:00:00`. Re-running `make backfill-snapshots` no longer generates duplicate rows (dedup by ts now works).
 
 ### Added — Per-asset concentration limits
 
-- **`concentration_limits`** (config nuevo): dict `{ISIN: float}` para definir un máximo individual por activo. Sobrescribe el `concentration_threshold` global. Útil para tener tolerancias distintas por tipo de activo (core ETFs alto, cripto bajo).
-- **`core.metrics.concentration()`** acepta ahora `limits` y `default_threshold`. Cada entrada del resultado incluye `limit`, `margin_pp` y `exceeded` para que el caller decida cómo presentar la info.
-- **Display de `make insights`**: cada posición muestra su límite efectivo y margen (o "EXCEDIDO en X pp"). Resumen al final: "✓ Todas dentro de su límite" o "⚠ N por encima".
-- 3 tests nuevos en `test_metrics.py` cubriendo: límites por ISIN, fallback a default_threshold, no-limit cuando ninguno se provee.
+- **`concentration_limits`** (new config): dict `{ISIN: float}` to define an individual cap per asset. Overrides the global `concentration_threshold`. Useful for setting different tolerances per asset type (high for core ETFs, low for crypto).
+- **`core.metrics.concentration()`** now accepts `limits` and `default_threshold`. Each result entry includes `limit`, `margin_pp`, and `exceeded` so the caller can decide how to present the info.
+- **`make insights` display**: each position shows its effective limit and margin (or "EXCEEDED by X pp"). Summary at the end: "✓ All within limit" or "⚠ N over".
+- 3 new tests in `test_metrics.py` covering: per-ISIN limits, fallback to default_threshold, no-limit when none provided.
 
 ### Added — Performance & docs (post-refactor)
 
-- **`core/cache.py`** + flag `--refresh`: cache pickle de `(snapshot, txs)` con TTL=5min. Encadena `make insights` / `make portfolio` / `make backfill-snapshots` sin re-fetch innecesario. Login a TR se evita totalmente cuando hay cache fresco.
-- **`INSIGHTS.md`**: doc en español explicando bloque a bloque el output de `make insights`, las 2 lecturas de cost basis, los 3 horizontes de MWR, el toggle income/deposit, y FAQ sobre las preguntas comunes.
-- **`IMPROVEMENTS.md`**: roadmap priorizado de mejoras pendientes (renta extraction, per-asset limits, crypto backfill, telemetría, alertas, etc.).
-- **`test_adapter.py`**: 24 tests del adapter TR cubriendo cada `eventType` (BUY/SELL/SAVEBACK/GIFT/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/CANCELED/missing-data) con parser mockeado. Suite total pasa de 116 a 140 tests.
+- **`core/cache.py`** + flag `--refresh`: pickle cache of `(snapshot, txs)` with TTL=5min. Chains `make insights` / `make portfolio` / `make backfill-snapshots` without unnecessary re-fetch. The TR login is fully avoided when there's a fresh cache.
+- **`INSIGHTS.md`**: doc explaining the `make insights` output block by block, the 2 readings of cost basis, the 3 MWR horizons, the income/deposit toggle, and FAQ about common questions.
+- **`IMPROVEMENTS.md`**: prioritized roadmap of pending improvements (renta extraction, per-asset limits, crypto backfill, telemetry, alerts, etc.).
+- **`test_adapter.py`**: 24 TR adapter tests covering each `eventType` (BUY/SELL/SAVEBACK/GIFT/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/CANCELED/missing-data) with a mocked parser. Total suite goes from 116 to 140 tests.
 
 ### Added
 
-- Toggles `features.{expenses,income,investments,portfolio}` en `config.yaml` para deshabilitar partes del sync.
-- Toggles `renta.{fifo,dividends,interest,bonds,summary_by_box,retentions,saveback,crypto,modelo720}` para personalizar las secciones del informe IRPF.
-- `month_names` configurable (lista de 12 nombres de mes) para soportar idiomas distintos al español.
-- Validación de `config.yaml` al arrancar con mensajes claros si falta un campo o tiene formato incorrecto.
-- `CONTRIBUTING.md` con guía para nuevos colaboradores.
-- `CHANGELOG.md` (este fichero).
-- `make init-sheet` (`tr_sync.py --init-sheet`): bootstrap de pestañas en la Google Sheet, idempotente. Pre-rellena los labels de portfolio_cell_map junto al portfolio_value_range.
-- `make doctor` (`tr_sync.py --doctor`): health check que verifica config, sesión pytr, OAuth gspread, accesibilidad de la Sheet, pestañas requeridas y coherencia portfolio_cell_map ↔ portfolio_value_range. Sale con exit code 1 si encuentra errores.
-- Workflow CI `.github/workflows/tests.yml` que corre los tests en cada push/PR (Python 3.11 y 3.12).
-- README en inglés (`README.md`); el español se mueve a `README.es.md` con cross-link entre ambos.
-- Layout `ledger` para Gastos/Ingresos como alternativa al `monthly_columns` original. Una fila por evento con columnas Fecha/Concepto/Importe. Configurable por pestaña vía `sheets.expenses_layout` / `sheets.income_layout`. Cabeceras personalizables con `sheets.ledger_headers`. `init-sheet` crea las cabeceras automáticamente cuando el layout es `ledger`.
-- Más campos extraídos a config para hacer el script verdaderamente reutilizable:
-  - `saveback_label` (label de la fila Saveback en Inversiones).
-  - `init_sheet_headers` (cabeceras que escribe `init-sheet`).
-  - `subtitle_translations` (traducciones alemán → idioma del usuario, mergeadas con default castellano).
-  - `renta_classification.dividend_subtitles` / `bond_cash_subtitles` / `bond_maturity_subtitles` (clasificación de subtitles de TR para el informe IRPF; permite añadir variantes sin tocar código).
-- Configurabilidad total de celdas:
-  - `sheets.ledger_columns`: columnas A1 para fecha/concepto/importe en layout `ledger` (defaults A/B/C). Pueden no ser contiguas.
-  - `sheets.month_header_amount` y `sheets.month_header_concept`: patrones de los headers de mes en layout `monthly_columns`. Soportan `{month}` y `{year}` para internacionalización.
-- **CLI interactiva de configuración** (`config_cli.py`, dep nueva: `questionary`):
-  - `make config-init`: wizard paso a paso para crear `config.yaml` desde cero (preguntando sheet_id, layouts, pestañas, portfolio, asset_name_map, etc.).
-  - `make config-show` / `config-validate` / `config-features` para inspección y toggles.
-  - `python tr_sync.py config set KEY VALUE` (dot-notation) para cambiar un campo concreto.
-  - `python tr_sync.py config add-asset ISIN LABEL` / `remove-asset` para gestionar `portfolio_cell_map` sin tocar YAML.
-  - `python tr_sync.py config add-ignore SECTION TEXT` / `remove-ignore` para gestionar `ignore_events`.
-  - El subcomando `config` se shortcircuit a nivel de import: arranca sin requerir `config.yaml` previo (ideal para el primer setup) y sin cargar `pytr`/`gspread`.
+- Toggles `features.{expenses,income,investments,portfolio}` in `config.yaml` to disable parts of the sync.
+- Toggles `renta.{fifo,dividends,interest,bonds,summary_by_box,retentions,saveback,crypto,modelo720}` to customize the IRPF report sections.
+- Configurable `month_names` (list of 12 month names) to support languages other than Spanish.
+- `config.yaml` validation at startup with clear messages if a field is missing or has an incorrect format.
+- `CONTRIBUTING.md` with a guide for new contributors.
+- `CHANGELOG.md` (this file).
+- `make init-sheet` (`tr_sync.py --init-sheet`): bootstraps tabs in the Google Sheet, idempotent. Pre-fills the labels of portfolio_cell_map next to the portfolio_value_range.
+- `make doctor` (`tr_sync.py --doctor`): health check that verifies config, pytr session, gspread OAuth, Sheet accessibility, required tabs, and consistency portfolio_cell_map ↔ portfolio_value_range. Exits with code 1 if errors are found.
+- CI workflow `.github/workflows/tests.yml` that runs the tests on each push/PR (Python 3.11 and 3.12).
+- README in English (`README.md`); Spanish moved to `README.es.md` with cross-link between the two.
+- `ledger` layout for Gastos/Ingresos as an alternative to the original `monthly_columns`. One row per event with Date/Concept/Amount columns. Configurable per tab via `sheets.expenses_layout` / `sheets.income_layout`. Customizable headers with `sheets.ledger_headers`. `init-sheet` creates the headers automatically when the layout is `ledger`.
+- More fields extracted to config to make the script truly reusable:
+  - `saveback_label` (label of the Saveback row in Investments).
+  - `init_sheet_headers` (headers written by `init-sheet`).
+  - `subtitle_translations` (German → user language translations, merged with the default Spanish).
+  - `renta_classification.dividend_subtitles` / `bond_cash_subtitles` / `bond_maturity_subtitles` (classification of TR subtitles for the IRPF report; lets you add variants without touching code).
+- Full cell configurability:
+  - `sheets.ledger_columns`: A1 columns for date/concept/amount in `ledger` layout (defaults A/B/C). Can be non-contiguous.
+  - `sheets.month_header_amount` and `sheets.month_header_concept`: month-header patterns in `monthly_columns` layout. Support `{month}` and `{year}` for internationalization.
+- **Interactive config CLI** (`config_cli.py`, new dep: `questionary`):
+  - `make config-init`: step-by-step wizard to create `config.yaml` from scratch (asks for sheet_id, layouts, tabs, portfolio, asset_name_map, etc.).
+  - `make config-show` / `config-validate` / `config-features` for inspection and toggles.
+  - `python tr_sync.py config set KEY VALUE` (dot-notation) to change a specific field.
+  - `python tr_sync.py config add-asset ISIN LABEL` / `remove-asset` to manage `portfolio_cell_map` without touching YAML.
+  - `python tr_sync.py config add-ignore SECTION TEXT` / `remove-ignore` to manage `ignore_events`.
+  - The `config` subcommand short-circuits at import time: starts without requiring a pre-existing `config.yaml` (ideal for first setup) and without loading `pytr`/`gspread`.
 
 ## [0.1.0] — 2026-04
 
-Primera versión pública del proyecto.
+First public release of the project.
 
-### Características
+### Features
 
-- Sincronización de gastos / ingresos / inversiones del último mes desde Trade Republic a un Google Sheet.
-- Snapshot de portfolio: escribe el `netValue` actual de cada activo en un rango configurable.
-- Informe IRPF (`make renta`):
-  - Ganancias/pérdidas patrimoniales con FIFO por ISIN.
-  - Soporte de acciones, ETFs, regalos (`ETF-Geschenk`), lotería (`Verlosung`), bonos extranjeros con cupón + amortización.
-  - Dividendos con bruto/retención/neto y desglose por país de origen para deducción doble imposición.
-  - Intereses, saveback, posición cripto y saldo total para Modelo 720/721.
-  - Volcado simultáneo a consola y a una pestaña `Renta YYYY` de la Sheet.
-- Configuración en `config.yaml` (gitignored). Plantilla en `config.example.yaml`.
-- Filtros `ignore_events` para descartar eventos que ya gestionas a mano (autotransferencias, nóminas).
-- Override manual `gift_cost_overrides` para regalos cuyos detalles TR no parsea.
-- Utilidad `inspect_events.py` para inspeccionar eventos brutos por tipo, ISIN o título.
-- Workflow opcional de GitHub Actions para sync automatizado.
-- Documentación: `README.md`, `CONFIG.md`, `SHEET_TEMPLATE.md`, `RENTA.md`.
-- 53 tests unitarios sobre la lógica pura (parsers, FIFO, agregadores) sin red.
-- Licencia MIT.
+- Sync of expenses / income / investments for the last month from Trade Republic to a Google Sheet.
+- Portfolio snapshot: writes the current `netValue` of each asset to a configurable range.
+- IRPF report (`make renta`):
+  - Capital gains/losses with FIFO per ISIN.
+  - Support for stocks, ETFs, gifts (`ETF-Geschenk`), lottery (`Verlosung`), foreign bonds with coupon + maturity.
+  - Dividends with gross/withholding/net and breakdown by country of origin for double-taxation deduction.
+  - Interest, saveback, crypto position, and total balance for Modelo 720/721.
+  - Simultaneous dump to console and to a `Renta YYYY` tab in the Sheet.
+- Configuration in `config.yaml` (gitignored). Template in `config.example.yaml`.
+- `ignore_events` filters to discard events you already manage manually (auto-transfers, salary).
+- Manual `gift_cost_overrides` override for gifts whose details TR doesn't parse.
+- `inspect_events.py` utility to inspect raw events by type, ISIN, or title.
+- Optional GitHub Actions workflow for automated sync.
+- Documentation: `README.md`, `CONFIG.md`, `SHEET_TEMPLATE.md`, `RENTA.md`.
+- 53 unit tests on pure logic (parsers, FIFO, aggregators) without network.
+- MIT License.

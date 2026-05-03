@@ -30,48 +30,48 @@ def doctor():
 
     Returns 0 if everything is OK, 1 if there are blocking errors.
     """
-    log.info("🔍 tr-sync doctor — chequeo de setup\n")
+    log.info("🔍 tr-sync doctor — setup check\n")
     errors = []
     warnings = []
 
     # 1. Config (already validated at module load; here we just confirm)
-    log.info(f"✓ config.yaml cargado y validado (sheet_id={SHEET_ID[:10]}...)")
-    log.info(f"  features activos: {', '.join(k for k, v in FEATURES.items() if v)}")
+    log.info(f"✓ config.yaml loaded and validated (sheet_id={SHEET_ID[:10]}...)")
+    log.info(f"  active features: {', '.join(k for k, v in FEATURES.items() if v)}")
 
     # 2. portfolio_cell_map vs portfolio_value_range
     col, row_start, row_end = parse_a1_column_range(PORTFOLIO_VALUE_RANGE)
     if col is None:
-        errors.append(f"portfolio_value_range='{PORTFOLIO_VALUE_RANGE}' no parseable como rango A1 de una columna.")
+        errors.append(f"portfolio_value_range='{PORTFOLIO_VALUE_RANGE}' not parseable as a single-column A1 range.")
     else:
         cells = row_end - row_start + 1
         n = len(PORTFOLIO_CELL_MAP)
         if cells != n:
             errors.append(
-                f"portfolio_value_range '{PORTFOLIO_VALUE_RANGE}' tiene {cells} celdas, "
-                f"pero portfolio_cell_map tiene {n} entradas. Ajusta uno de los dos."
+                f"portfolio_value_range '{PORTFOLIO_VALUE_RANGE}' has {cells} cells, "
+                f"but portfolio_cell_map has {n} entries. Adjust one of the two."
             )
         else:
-            log.info(f"✓ portfolio_value_range {PORTFOLIO_VALUE_RANGE} ({cells} celdas) coincide con portfolio_cell_map ({n} entradas)")
+            log.info(f"✓ portfolio_value_range {PORTFOLIO_VALUE_RANGE} ({cells} cells) matches portfolio_cell_map ({n} entries)")
 
     # 3. pytr session
     pytr_dir = Path.home() / ".pytr"
     if pytr_dir.exists() and any(pytr_dir.iterdir()):
-        log.info(f"✓ Sesión pytr presente en {pytr_dir}")
+        log.info(f"✓ pytr session present at {pytr_dir}")
     else:
-        warnings.append(f"{pytr_dir} no existe o está vacío. Lanza `make login` antes de `make sync`.")
+        warnings.append(f"{pytr_dir} does not exist or is empty. Run `make login` before `make sync`.")
 
     # 4. Google Sheet
     try:
         spreadsheet = open_spreadsheet()
-        log.info(f"✓ Google Sheet accesible: '{spreadsheet.title}'")
+        log.info(f"✓ Google Sheet reachable: '{spreadsheet.title}'")
     except Exception as e:
-        errors.append(f"No se pudo abrir Google Sheet (sheet_id='{SHEET_ID}'): {e}")
+        errors.append(f"Could not open Google Sheet (sheet_id='{SHEET_ID}'): {e}")
         spreadsheet = None
 
     # 5. Tabs
     if spreadsheet is not None:
         existing_tabs = {ws.title for ws in spreadsheet.worksheets()}
-        log.info(f"  pestañas en la Sheet: {sorted(existing_tabs)}")
+        log.info(f"  tabs in the Sheet: {sorted(existing_tabs)}")
 
         required = []
         if FEATURES.get("expenses", True):    required.append(EXPENSES_SHEET)
@@ -81,30 +81,30 @@ def doctor():
 
         for tab in required:
             if tab in existing_tabs:
-                log.info(f"✓ Pestaña '{tab}' presente")
+                log.info(f"✓ Tab '{tab}' present")
             else:
-                errors.append(f"Pestaña '{tab}' no encontrada. Lanza `make init-sheet` o créala a mano (ver SHEET_TEMPLATE.md).")
+                errors.append(f"Tab '{tab}' not found. Run `make init-sheet` or create it manually (see SHEET_TEMPLATE.md).")
 
         for tab in (STATUS_SHEET, SYNC_STATE_SHEET):
             if tab in existing_tabs:
-                log.info(f"✓ Pestaña '{tab}' presente")
+                log.info(f"✓ Tab '{tab}' present")
             else:
-                warnings.append(f"Pestaña '{tab}' no existe (se creará automáticamente al primer sync).")
+                warnings.append(f"Tab '{tab}' does not exist (it will be created automatically on the first sync).")
 
     # Summary
     log.info("")
     if warnings:
-        log.info("⚠️  Avisos no críticos:")
+        log.info("⚠️  Non-critical warnings:")
         for w in warnings:
             log.info(f"   - {w}")
         log.info("")
     if errors:
-        log.error("❌ Errores que tienes que resolver:")
+        log.error("❌ Errors you need to fix:")
         for e in errors:
             log.error(f"   - {e}")
         return 1
     if warnings:
-        log.info("✅ Setup OK (con avisos). Puedes lanzar `make sync`.")
+        log.info("✅ Setup OK (with warnings). You can run `make sync`.")
     else:
-        log.info("✅ Todo OK. Puedes lanzar `make sync`, `make portfolio` o `make renta`.")
+        log.info("✅ All OK. You can run `make sync`, `make portfolio` or `make renta`.")
     return 0

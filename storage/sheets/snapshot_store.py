@@ -1,12 +1,12 @@
 """
 Google Sheets implementation of `core.snapshot_store.SnapshotStore`.
 
-Escribe a dos pestañas ocultas:
-  - <agg_sheet>: 1 fila por snapshot con cash + positions_value + cost_basis + total.
-  - <positions_sheet>: 1 fila por (snapshot, posición) con shares + net_value + cost_basis.
+Writes to two hidden tabs:
+  - <agg_sheet>: 1 row per snapshot with cash + positions_value + cost_basis + total.
+  - <positions_sheet>: 1 row per (snapshot, position) with shares + net_value + cost_basis.
 
-Ambas se crean automáticamente si no existen, con header en fila 1 y la
-pestaña marcada como hidden.
+Both are created automatically when missing, with a header in row 1 and the
+tab marked as hidden.
 """
 from __future__ import annotations
 

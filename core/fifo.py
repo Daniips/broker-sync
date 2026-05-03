@@ -1,6 +1,5 @@
 """
 Generic FIFO algorithm by ISIN for tax reports. Broker-agnostic.
-FIFO genérico por ISIN para informes fiscales. Agnóstico de broker.
 """
 from collections import defaultdict
 
@@ -14,17 +13,8 @@ def apply_fifo(buy_lots, sales):
         sales:    list of dicts with keys {timestamp, isin, title, shares, proceeds_eur}.
 
     Returns: list of {sale, shares_matched, shares_unmatched, cost_basis, gain_loss, matched_lots}.
-
-    Aplica FIFO por ISIN: casa cada venta contra las compras más antiguas del mismo ISIN.
-
-    Entradas:
-        buy_lots: lista de dicts con {timestamp, isin, title, shares, cost_eur}.
-        sales:    lista de dicts con {timestamp, isin, title, shares, proceeds_eur}.
-
-    Devuelve: lista de {sale, shares_matched, shares_unmatched, cost_basis, gain_loss, matched_lots}.
     """
     # Group buy lots by ISIN, keeping their order (assumed chronological by caller).
-    # Agrupa lotes por ISIN, manteniendo el orden (se asume cronológico desde el caller).
     lots_by_isin = defaultdict(list)
     for l in buy_lots:
         lots_by_isin[l["isin"]].append({

@@ -1,20 +1,17 @@
 """
 Registry of product features and their broker-capability requirements.
 
-Registro de features del producto y las capabilities de broker que necesita
-cada una.
+Usage:
+  - Each feature declares which `capabilities` it needs from the active broker.
+  - Each broker (`brokers/<x>/__init__.py`) exports a CAPABILITIES set.
+  - The user config (`config.yaml > features`) can enable/disable any
+    feature individually.
+  - `is_feature_enabled(name, broker_caps, config)` combines both signals.
 
-Usage / Uso:
-  - Cada feature declara qué `capabilities` necesita del broker activo.
-  - Cada broker (`brokers/<x>/__init__.py`) exporta un set CAPABILITIES.
-  - El config del usuario (`config.yaml > features`) puede activar/desactivar
-    cualquier feature individualmente.
-  - `is_feature_enabled(name, broker_caps, config)` combina ambas señales.
-
-Por qué importa: cuando llegue un 2º broker que no soporte X (p.ej. saveback
-no aplica a IBKR), las features que dependen de X se desactivan
-automáticamente en vez de petar al ejecutarse. El usuario ve en `make features`
-qué está disponible y qué no, y por qué.
+Why it matters: when a 2nd broker arrives that doesn't support X (e.g.
+saveback doesn't apply to IBKR), features depending on X get disabled
+automatically instead of crashing at runtime. The user sees in
+`make features` what is available and what isn't, and why.
 """
 from __future__ import annotations
 
@@ -31,70 +28,69 @@ class Feature:
 
 
 # Registry of all product features. Add new ones here as you build them.
-# Registro de todas las features. Cuando añadas una nueva, decláralas aquí.
 FEATURE_REGISTRY: dict[str, Feature] = {
-    # ── Sync diario a la Sheet ──────────────────────────────────────────
+    # ── Daily sync to the Sheet ─────────────────────────────────────────
     "expenses": Feature(
         name="expenses",
-        description="Sincroniza gastos del broker (CARD_TRANSACTION, BIZUM out) a Sheet",
+        description="Sync broker expenses (CARD_TRANSACTION, BIZUM out) to the Sheet",
         requires=("expense_tracking",),
     ),
     "income": Feature(
         name="income",
-        description="Sincroniza ingresos del broker (BIZUM in, transferencias) a Sheet",
+        description="Sync broker income (BIZUM in, transfers) to the Sheet",
         requires=("expense_tracking",),
     ),
     "investments": Feature(
         name="investments",
-        description="Recalcula 'Dinero invertido YYYY' con BUYs del mes actual",
+        description="Recompute 'Dinero invertido YYYY' with the current month's BUYs",
         requires=("fetch_transactions",),
     ),
     "portfolio": Feature(
         name="portfolio",
-        description="Snapshot de valor por activo a la pestaña 'Calculo ganancias'",
+        description="Per-asset value snapshot to the 'Calculo ganancias' tab",
         requires=("fetch_snapshot",),
     ),
 
-    # ── Informes / análisis ─────────────────────────────────────────────
+    # ── Reports / analysis ──────────────────────────────────────────────
     "renta": Feature(
         name="renta",
-        description="Informe IRPF español: FIFO + dividendos + intereses + bonos + 720",
+        description="Spanish IRPF report: FIFO + dividends + interest + bonds + 720",
         requires=("fetch_transactions", "tax_renta_es"),
     ),
     "insights": Feature(
         name="insights",
-        description="Patrimonio, rentabilidad TR-style + propio, MWR, aportaciones",
+        description="Net worth, TR-style + own return, MWR, contributions",
         requires=("fetch_transactions", "fetch_snapshot"),
     ),
     "concentration": Feature(
         name="concentration",
-        description="Distribución de cartera por posición + alerta de concentración",
+        description="Per-position distribution + concentration alert",
         requires=("fetch_snapshot",),
     ),
 
-    # ── Snapshots históricos ────────────────────────────────────────────
+    # ── Historical snapshots ────────────────────────────────────────────
     "snapshot_persist": Feature(
         name="snapshot_persist",
-        description="Guarda snapshot agregado y por posición en pestañas ocultas",
+        description="Persist aggregate and per-position snapshots in hidden tabs",
         requires=("fetch_snapshot",),
     ),
     "backfill_snapshots": Feature(
         name="backfill_snapshots",
-        description="Reconstruye snapshots históricos con precios pasados",
+        description="Reconstruct historical snapshots with past prices",
         requires=("fetch_snapshot", "fetch_transactions", "fetch_price_history"),
     ),
 
-    # ── Métricas que dependen de features broker-específicas ────────────
+    # ── Metrics depending on broker-specific features ───────────────────
     "saveback_metrics": Feature(
         name="saveback_metrics",
-        description="Plusvalía descontando saveback (cuando el broker tiene saveback)",
+        description="P&L net of saveback (when the broker has saveback)",
         requires=("fetch_snapshot", "fetch_transactions", "saveback"),
     ),
 }
 
 
 def is_feature_supported(feature_name: str, broker_capabilities: Iterable[str]) -> bool:
-    """¿El broker actual soporta TODAS las capabilities que la feature necesita?"""
+    """Does the current broker support ALL capabilities required by the feature?"""
     f = FEATURE_REGISTRY.get(feature_name)
     if f is None:
         return False
@@ -107,12 +103,12 @@ def is_feature_enabled(
     broker_capabilities: Iterable[str],
     config_features: dict | None = None,
 ) -> bool:
-    """¿Está activa la feature? Combina toggle de usuario (config) y soporte del broker.
+    """Is the feature active? Combines the user's toggle (config) and broker support.
 
-    - Si la feature no existe en el registro → False.
-    - Si el broker no la soporta → False (independientemente del config).
-    - Si el config la marca como `false` → False.
-    - En otro caso → True.
+    - If the feature is not in the registry → False.
+    - If the broker does not support it → False (regardless of config).
+    - If config marks it as `false` → False.
+    - Otherwise → True.
     """
     f = FEATURE_REGISTRY.get(feature_name)
     if f is None:
@@ -127,9 +123,9 @@ def feature_status(
     broker_capabilities: Iterable[str],
     config_features: dict | None = None,
 ) -> list[dict]:
-    """Devuelve estado de cada feature (para tablas/diagnóstico).
+    """Return the status of each feature (for tables/diagnostics).
 
-    Cada entrada: {name, description, supported, enabled_in_config, effective}.
+    Each entry: {name, description, supported, enabled_in_config, effective}.
     """
     cfg = config_features or {}
     caps = set(broker_capabilities)

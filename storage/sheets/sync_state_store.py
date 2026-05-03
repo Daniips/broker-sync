@@ -1,9 +1,7 @@
 """
-Hidden tab to dedup events across sync runs.
-
-Pestaña oculta para deduplicar eventos entre ejecuciones del sync. Cada fila
-es un event id ya procesado; antes de escribir un evento a la Sheet, miramos
-si su id está aquí.
+Hidden tab to dedup events across sync runs. Each row is an already-processed
+event id; before writing an event to the Sheet, we check whether its id is
+already here.
 """
 from __future__ import annotations
 
@@ -13,7 +11,7 @@ import gspread
 
 
 class SyncStateStore:
-    """Persistencia del set de event ids ya sincronizados."""
+    """Persistence of the set of already-synced event ids."""
 
     def __init__(self, spreadsheet, *, sheet_name: str):
         self.spreadsheet = spreadsheet
@@ -34,12 +32,12 @@ class SyncStateStore:
             return ws
 
     def load(self) -> set[str]:
-        """Devuelve el set de event ids ya escritos."""
+        """Return the set of already-written event ids."""
         ws = self._get_or_create_ws()
         return set(ws.col_values(1)[1:])
 
     def append(self, new_ids: Iterable[str]) -> None:
-        """Añade event ids al set (no deduplica internamente; el caller filtra)."""
+        """Append event ids to the set (no internal dedup; caller filters)."""
         ids = list(new_ids)
         if not ids:
             return

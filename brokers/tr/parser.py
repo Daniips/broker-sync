@@ -1,14 +1,9 @@
 """
 Parsers for raw Trade Republic events.
-Parsers de eventos brutos de Trade Republic.
 
 These extractors operate on the JSON returned by the TR API (`amount`,
 `details.sections`, `icon` fields) and are independent from the global config.
 Used to build buy/sell lots for the FIFO engine.
-
-Estos extractores trabajan sobre el JSON que devuelve la API de TR (`amount`,
-`details.sections`, `icon`) y son independientes del config global. Se usan
-para construir lotes de compra/venta para el motor FIFO.
 """
 from __future__ import annotations
 
@@ -18,7 +13,6 @@ from core.utils import parse_de_number
 
 
 # ISIN regex: 2 letters + 9 alphanumeric + 1 digit (ISO 6166).
-# ISIN regex: 2 letras + 9 alfanuméricos + 1 dígito (ISO 6166).
 _ISIN_RE = re.compile(r"logos/([A-Z]{2}[A-Z0-9]{9}\d)/v")
 
 
@@ -28,10 +22,6 @@ def extract_isin_from_icon(raw):
 
     For gifts (GIFTING_RECIPIENT_ACTIVITY) the root `icon` is the generic
     'timeline_gift'; the actual ISIN lives inside `details.sections[0].data.icon`.
-
-    Busca el ISIN en icon / avatar.asset / details.sections[0].data.icon.
-    Para regalos el root `icon` es genérico ('timeline_gift') y el ISIN real
-    vive dentro de `details.sections[0].data.icon`.
     """
     candidates = [raw.get("icon"), (raw.get("avatar") or {}).get("asset")]
     sections = ((raw.get("details") or {}).get("sections") or [])
@@ -62,13 +52,6 @@ def extract_trade_details(raw):
          the "Übersicht" table, with shares in displayValue.prefix ('1,035444 × ').
       B) TRADE_INVOICE (older buys/sells): own section title="Transaktion" with
          rows 'Anteile' / 'Aktien' and 'Aktienkurs'.
-
-    Extrae {isin, shares, unit_price} del bloque details.sections.
-    Soporta dos formatos:
-      A) TRADING_TRADE_EXECUTED / SAVINGSPLAN / SAVEBACK: fila "Transaktion"
-         dentro de la tabla "Übersicht", con shares en displayValue.prefix.
-      B) TRADE_INVOICE (compras/ventas antiguas): sección propia title="Transaktion"
-         con filas 'Anteile' / 'Aktien' y 'Aktienkurs'.
     """
     details = raw.get("details") or {}
     sections = details.get("sections") or []
@@ -84,7 +67,6 @@ def extract_trade_details(raw):
     shares = unit_price = None
 
     # Format A
-    # Formato A
     for s in sections:
         if s.get("type") != "table":
             continue
@@ -111,7 +93,6 @@ def extract_trade_details(raw):
             break
 
     # Format B (fallback)
-    # Formato B (fallback)
     if shares is None:
         for s in sections:
             if s.get("type") != "table" or s.get("title") != "Transaktion":
@@ -140,10 +121,6 @@ def extract_gift_details(raw):
 
     The fiscal cost (market value at reception) lives in Transaktion→Summe.
     Falls back to shares × Aktienkurs from the Übersicht block if missing.
-
-    Extrae {isin, shares, cost_eur} de GIFTING_RECIPIENT_ACTIVITY / LOTTERY_PRIZE.
-    El coste fiscal (valor al recibir) está en Transaktion→Summe. Si no está,
-    cae a shares × Aktienkurs del bloque Übersicht.
     """
     details = raw.get("details") or {}
     sections = details.get("sections") or []
@@ -200,10 +177,6 @@ def extract_dividend_details(raw):
 
     The 'Geschäft' table has rows 'Bruttoertrag' (gross), 'Steuer' (withholding)
     and 'Gesamt' (net).
-
-    Extrae {isin, gross, tax, net, subtitle} de SSP_CORPORATE_ACTION_CASH.
-    La tabla 'Geschäft' tiene filas 'Bruttoertrag' (bruto), 'Steuer' (retención)
-    y 'Gesamt' (neto).
     """
     isin = extract_isin_from_icon(raw)
     if not isin:
@@ -235,7 +208,6 @@ def extract_dividend_details(raw):
         break
 
     # Fallback: if Gesamt isn't found in Geschäft, use amount.value.
-    # Fallback: si no encontramos Gesamt en Geschäft, usar amount.value.
     if net is None:
         net = (raw.get("amount") or {}).get("value")
     if gross is None and net is not None and tax is not None:

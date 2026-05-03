@@ -1,8 +1,8 @@
-# Tu repo de GitHub para los targets opcionales (upload-secret/clear-cache).
-# Tres formas de definirlo, en orden de preferencia:
-#   1) Crea un Makefile.local (gitignored) con: REPO := tu_usuario/tu_repo
-#   2) Variable de entorno: export REPO=tu_usuario/tu_repo
-#   3) En la línea: REPO=tu_usuario/tu_repo make upload-secret
+# Your GitHub repo for the optional targets (upload-secret/clear-cache).
+# Three ways to define it, in order of preference:
+#   1) Create a Makefile.local (gitignored) with: REPO := your_user/your_repo
+#   2) Environment variable: export REPO=your_user/your_repo
+#   3) Inline: REPO=your_user/your_repo make upload-secret
 -include Makefile.local
 REPO ?=
 VENV := .venv
@@ -13,44 +13,44 @@ PYTR := $(VENV)/bin/pytr
 
 help:
 	@echo "Setup:"
-	@echo "  make setup            crea .venv e instala dependencias"
-	@echo "  make login            pytr login (interactivo, SMS si cookie caducada)"
-	@echo "  make config-init      asistente interactivo para crear config.yaml"
-	@echo "  make init-sheet       crea las pestañas que falten en tu Google Sheet"
-	@echo "  make doctor           verifica que el setup está listo (config, OAuth, pestañas, sesión)"
+	@echo "  make setup            create .venv and install dependencies"
+	@echo "  make login            pytr login (interactive, SMS if cookie expired)"
+	@echo "  make config-init      interactive wizard to create config.yaml"
+	@echo "  make init-sheet       create the missing tabs in your Google Sheet"
+	@echo "  make doctor           verify the setup is ready (config, OAuth, tabs, session)"
 	@echo ""
-	@echo "Edición de config (sin tocar el yaml a mano):"
-	@echo "  make config-show      imprime el config actual"
-	@echo "  make config-validate  valida el config"
-	@echo "  make config-features  toggles interactivos de features"
-	@echo "  python tr_sync.py config set KEY VALUE        cambia un valor"
-	@echo "  python tr_sync.py config add-asset ISIN LABEL añade ISIN al portfolio"
-	@echo "  python tr_sync.py config add-ignore SECTION TXT  añade patrón ignore"
+	@echo "Config editing (without touching the yaml by hand):"
+	@echo "  make config-show      print the current config"
+	@echo "  make config-validate  validate the config"
+	@echo "  make config-features  interactive feature toggles"
+	@echo "  python tr_sync.py config set KEY VALUE        change a value"
+	@echo "  python tr_sync.py config add-asset ISIN LABEL add an ISIN to the portfolio"
+	@echo "  python tr_sync.py config add-ignore SECTION TXT  add an ignore pattern"
 	@echo ""
-	@echo "Uso diario:"
-	@echo "  make sync             sincroniza gastos/ingresos/inversiones del mes"
-	@echo "  make portfolio        snapshot del portfolio (valor actual por activo)"
-	@echo "  make verify           portfolio dry-run local (no escribe en la Sheet)"
-	@echo "  make renta            informe IRPF del año pasado"
-	@echo "  make renta YEAR=2025  informe IRPF de un año concreto"
-	@echo "  make insights         patrimonio + rentabilidad (simple + MWR) en consola"
-	@echo "  make features         tabla de features con su estado (config + soporte broker)"
-	@echo "  make inspect          inspecciona eventos brutos de TR (debug)"
-	@echo "  make test             ejecuta tests unitarios"
+	@echo "Daily use:"
+	@echo "  make sync             sync the month's expenses/income/investments"
+	@echo "  make portfolio        portfolio snapshot (current value per asset)"
+	@echo "  make verify           local portfolio dry-run (does not write to the Sheet)"
+	@echo "  make renta            IRPF report for last year"
+	@echo "  make renta YEAR=2025  IRPF report for a specific year"
+	@echo "  make insights         net worth + return (simple + MWR) in console"
+	@echo "  make features         table of features with their status (config + broker support)"
+	@echo "  make inspect          inspect raw TR events (debug)"
+	@echo "  make test             run unit tests"
 	@echo ""
-	@echo "GitHub Actions (opcional, requiere REPO=usuario/repo):"
-	@echo "  make all              login + sync + portfolio + sube cookie a GitHub"
-	@echo "  make refresh-cookie   login + verify + sube cookie a GitHub"
-	@echo "  make upload-secret    sube ~/.pytr a PYTR_KEYS_B64 del repo"
-	@echo "  make clear-cache      borra caches pytr-session-* de GitHub Actions"
+	@echo "GitHub Actions (optional, requires REPO=user/repo):"
+	@echo "  make all              login + sync + portfolio + uploads cookie to GitHub"
+	@echo "  make refresh-cookie   login + verify + uploads cookie to GitHub"
+	@echo "  make upload-secret    upload ~/.pytr to PYTR_KEYS_B64 of the repo"
+	@echo "  make clear-cache      delete pytr-session-* caches from GitHub Actions"
 
 setup:
 	python3 -m venv $(VENV)
 	$(PYTHON) -m pip install --upgrade pip
 	$(PYTHON) -m pip install -r requirements.txt
 	@echo ""
-	@echo "✅ Setup hecho. Ahora:"
-	@echo "   1) Copia config.example.yaml a config.yaml y rellénalo"
+	@echo "✅ Setup done. Now:"
+	@echo "   1) Copy config.example.yaml to config.yaml and fill it in"
 	@echo "   2) make login"
 
 login:
@@ -104,22 +104,22 @@ mwr-flows:
 features:
 	$(PYTHON) tr_sync.py --features
 
-# ── Targets opcionales para GitHub Actions ────────────────────────────────
-# Requieren `gh` CLI autenticado y la variable REPO=tu_usuario/tu_repo.
+# ── Optional targets for GitHub Actions ──────────────────────────────────
+# Require an authenticated `gh` CLI and the variable REPO=your_user/your_repo.
 
 _check-repo:
 	@if [ -z "$(REPO)" ]; then \
-	  echo "ERROR: define REPO=tu_usuario/tu_repo (ej. REPO=alice/tr-sync make upload-secret)"; \
+	  echo "ERROR: define REPO=your_user/your_repo (e.g. REPO=alice/tr-sync make upload-secret)"; \
 	  exit 1; \
 	fi
 
 all: login sync portfolio upload-secret clear-cache
 	@echo ""
-	@echo "✅ Login + sync + portfolio completados. Cookie subida a GitHub."
+	@echo "✅ Login + sync + portfolio completed. Cookie uploaded to GitHub."
 
 refresh-cookie: login verify upload-secret clear-cache
 	@echo ""
-	@echo "✅ Cookie refrescada."
+	@echo "✅ Cookie refreshed."
 
 upload-secret: _check-repo
 	tar -czf /tmp/pytr.tgz -C $$HOME .pytr/
@@ -129,7 +129,7 @@ upload-secret: _check-repo
 clear-cache: _check-repo
 	@ids=$$(gh cache list --repo $(REPO) --key pytr-session --json id --jq '.[].id'); \
 	if [ -z "$$ids" ]; then \
-	  echo "no hay caches pytr-session-*"; \
+	  echo "no pytr-session-* caches"; \
 	else \
 	  for id in $$ids; do gh cache delete $$id --repo $(REPO); done; \
 	fi

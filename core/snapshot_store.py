@@ -1,13 +1,8 @@
 """
 Protocol and pure helpers for persisting historical PortfolioSnapshots.
 
-Protocolo y helpers puros para persistir PortfolioSnapshots históricos.
-
 The actual storage backend (Google Sheets, SQLite, JSON file…) lives outside
 of `core/`; this module defines the interface and the pure conversion logic.
-
-El backend real (Sheets, SQLite, JSON…) vive fuera de `core/`; este módulo
-define la interfaz y la lógica pura de conversión.
 """
 from __future__ import annotations
 
@@ -17,12 +12,12 @@ from typing import Optional, Protocol, runtime_checkable
 from core.types import PortfolioSnapshot
 
 
-# Esquema del row agregado (uno por snapshot).
+# Schema of the aggregate row (one per snapshot).
 SNAPSHOT_AGG_HEADER: tuple[str, ...] = (
     "ts", "cash_eur", "positions_value_eur", "cost_basis_eur", "total_eur",
 )
 
-# Esquema del row por posición (uno por (snapshot, posición)).
+# Schema of the per-position row (one per (snapshot, position)).
 SNAPSHOT_POSITIONS_HEADER: tuple[str, ...] = (
     "ts", "isin", "title", "shares", "net_value_eur", "cost_basis_eur",
 )
@@ -32,10 +27,10 @@ def snapshot_to_rows(
     snapshot: PortfolioSnapshot,
     cost_basis_total: Optional[float],
 ) -> tuple[list, list[list]]:
-    """Convierte un snapshot en (agg_row, [pos_rows]) para serialización.
+    """Convert a snapshot into (agg_row, [pos_rows]) for serialization.
 
-    Función pura, sin I/O. La usa tanto el backend Sheets como cualquier otro
-    que añadamos (CSV, SQLite, etc.) — solo cambia cómo se escriben las filas.
+    Pure function, no I/O. Used by the Sheets backend and by any other
+    backend we add (CSV, SQLite, etc.) — only the row-writing differs.
     """
     ts_iso = snapshot.ts.isoformat()
     agg = [
@@ -60,10 +55,10 @@ def snapshot_to_rows(
 
 
 def snapshot_value_at(snapshots: list[dict], target_ts: datetime) -> Optional[float]:
-    """Devuelve `positions_value_eur` del último snapshot con ts ≤ target_ts.
+    """Return `positions_value_eur` of the latest snapshot with ts ≤ target_ts.
 
-    Asume `snapshots` ordenado ascendente por ts (lo que devuelve `load_history`).
-    Devuelve None si no hay snapshot anterior.
+    Assumes `snapshots` is sorted ascending by ts (what `load_history`
+    returns). Returns None if no earlier snapshot exists.
     """
     candidates = [s for s in snapshots if s["ts"] <= target_ts]
     if not candidates:
@@ -73,10 +68,10 @@ def snapshot_value_at(snapshots: list[dict], target_ts: datetime) -> Optional[fl
 
 @runtime_checkable
 class SnapshotStore(Protocol):
-    """Interfaz que cualquier backend de snapshots debe implementar.
+    """Interface every snapshot backend must implement.
 
-    Los métodos hacen I/O contra el storage subyacente. Las implementaciones
-    viven en `storage/<backend>/snapshot_store.py`.
+    Methods perform I/O against the underlying storage. Implementations
+    live in `storage/<backend>/snapshot_store.py`.
     """
 
     def append(
@@ -84,7 +79,7 @@ class SnapshotStore(Protocol):
         snapshot: PortfolioSnapshot,
         cost_basis_total: Optional[float],
     ) -> None:
-        """Añade un snapshot al store (agregado + por posición)."""
+        """Append a snapshot to the store (aggregate + per position)."""
 
     def append_batch(
         self,
@@ -92,19 +87,19 @@ class SnapshotStore(Protocol):
         *,
         skip_existing: bool = True,
     ) -> int:
-        """Escribe N snapshots de una vez (más eficiente que N appends).
+        """Write N snapshots at once (more efficient than N appends).
 
-        `skip_existing=True`: omite snapshots con ts ya presente — permite
-        re-ejecuciones idempotentes del backfill.
+        `skip_existing=True`: skip snapshots whose ts is already present —
+        enables idempotent backfill re-runs.
 
-        Devuelve el número de snapshots realmente escritos.
+        Returns the number of snapshots actually written.
         """
 
     def load_history(self) -> list[dict]:
-        """Lee todos los snapshots agregados ordenados por ts ascendente.
+        """Read all aggregate snapshots sorted by ts ascending.
 
-        Cada entrada: {ts, cash_eur, positions_value_eur, cost_basis_eur, total_eur}.
+        Each entry: {ts, cash_eur, positions_value_eur, cost_basis_eur, total_eur}.
         """
 
     def load_timestamps(self) -> set[str]:
-        """Devuelve solo los ts (ISO strings) ya escritos. Útil para dedup."""
+        """Return just the already-written ts (ISO strings). Useful for dedup."""

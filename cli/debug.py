@@ -15,22 +15,22 @@ def debug_isin(isin: str, *, refresh: bool = False):
     """
     _, txs, _ = _ensure_tr_session(refresh=refresh)
     matches = [t for t in txs if t.isin == isin]
-    log.info(f"   {len(matches)} transacciones para {isin}.\n")
+    log.info(f"   {len(matches)} transactions for {isin}.\n")
 
     if not matches:
-        log.warning("No se encontraron transacciones para ese ISIN. Verifica que sea correcto.")
+        log.warning("No transactions found for that ISIN. Check that it is correct.")
         return
 
     # Summary by kind
     by_kind = Counter(t.kind.value for t in matches)
-    print(f"Resumen por kind:")
+    print(f"Summary by kind:")
     for k, n in sorted(by_kind.items()):
         total = sum(t.amount_eur for t in matches if t.kind.value == k)
-        print(f"  {k:<12} count={n:>4}   suma={total:>12,.2f} €")
+        print(f"  {k:<12} count={n:>4}   sum={total:>12,.2f} €")
     print()
 
     # Sorted detail
-    print(f"{'fecha':<12} {'kind':<10} {'shares':>10} {'amount':>12} {'bonus':>6}  título")
+    print(f"{'date':<12} {'kind':<10} {'shares':>10} {'amount':>12} {'bonus':>6}  title")
     print(f"{'-'*12} {'-'*10} {'-'*10} {'-'*12} {'-'*6}  {'-'*40}")
     for t in sorted(matches, key=lambda x: x.ts):
         ts = t.ts.strftime("%Y-%m-%d")
@@ -43,6 +43,6 @@ def debug_isin(isin: str, *, refresh: bool = False):
     from core.metrics import cost_basis_of_current_holdings
     cb = cost_basis_of_current_holdings(matches, bonus_at_zero_cost=True)
     cb_full = cost_basis_of_current_holdings(matches, bonus_at_zero_cost=False)
-    print("Cost basis tras FIFO:")
-    print(f"  saveback a 0€:           {cb.get(isin, 0.0):>12,.2f} €")
-    print(f"  saveback a precio merc.: {cb_full.get(isin, 0.0):>12,.2f} €")
+    print("Cost basis after FIFO:")
+    print(f"  saveback at 0€:            {cb.get(isin, 0.0):>12,.2f} €")
+    print(f"  saveback at market price:  {cb_full.get(isin, 0.0):>12,.2f} €")

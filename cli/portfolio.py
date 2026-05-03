@@ -27,9 +27,9 @@ def sync_portfolio(dry_run: bool):
     No-op if `features.portfolio=false`.
     """
     if not is_feature_enabled("portfolio"):
-        log.info("Feature 'portfolio' deshabilitada (config o broker).")
+        log.info("Feature 'portfolio' disabled (config or broker).")
         return
-    log.info("Conectando a Trade Republic...")
+    log.info("Connecting to Trade Republic...")
     tr = login()
     positions = asyncio.run(fetch_tr_portfolio(tr))
     by_isin = {p["instrumentId"]: p for p in positions}
@@ -42,20 +42,20 @@ def sync_portfolio(dry_run: bool):
         if not pos or "netValue" not in pos:
             missing.append(label)
             values.append([""])
-            log.warning(f"   {label:<12} ISIN={isin}  (no encontrado en TR)")
+            log.warning(f"   {label:<12} ISIN={isin}  (not found in TR)")
             continue
         net_value = float(pos["netValue"])
         values.append([net_value])
         log.info(f"   {label:<12} ISIN={isin}  {net_value:>10.2f} €")
 
     if dry_run:
-        log.info("\n[dry-run] no se escribe nada en la Sheet.")
+        log.info("\n[dry-run] nothing written to the Sheet.")
         return
 
     spreadsheet = open_spreadsheet()
     worksheet = spreadsheet.worksheet(PORTFOLIO_SHEET)
     worksheet.update(range_name=PORTFOLIO_VALUE_RANGE, values=values, value_input_option="USER_ENTERED")
-    log.info(f"\nOK: {len(values) - len(missing)}/{len(values)} celdas escritas en {PORTFOLIO_SHEET}!{PORTFOLIO_VALUE_RANGE}")
+    log.info(f"\nOK: {len(values) - len(missing)}/{len(values)} cells written to {PORTFOLIO_SHEET}!{PORTFOLIO_VALUE_RANGE}")
     write_status(spreadsheet, "portfolio")
 
     # Persist the full snapshot (cash + positions) for MWR history.
@@ -65,6 +65,6 @@ def sync_portfolio(dry_run: bool):
         snap = asyncio.run(fetch_snapshot(tr, tz=TIMEZONE))
         store = _make_snapshot_store(spreadsheet)
         store.append(snap, _cb_total(snap))
-        log.info(f"   snapshot guardado en `{SNAPSHOTS_SHEET}` (oculto).")
+        log.info(f"   snapshot saved to `{SNAPSHOTS_SHEET}` (hidden).")
     except Exception as e:
-        log.warning(f"   ⚠ no se pudo guardar snapshot ({e})")
+        log.warning(f"   ⚠ could not save snapshot ({e})")

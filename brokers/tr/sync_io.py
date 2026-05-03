@@ -3,7 +3,7 @@
 This is the I/O layer for the TR broker. The functions here:
   - Talk to TR's pytr client (login, websocket loops).
   - Normalize raw timeline events into the dict shape used by sync().
-  - Filter events into the per-Sheet flows (gastos / ingresos).
+  - Filter events into the per-Sheet flows (expenses / income).
 
 Pure-data adapter logic (raw → Transaction / PortfolioSnapshot) lives in
 `brokers/tr/adapter.py`. Parser primitives live in `brokers/tr/parser.py`.
@@ -26,7 +26,7 @@ def _patch_compact_portfolio_with_sec_acc_no(tr):
                 sec_acc_no = settings[k]
                 break
     if not sec_acc_no:
-        raise RuntimeError(f"No encuentro securitiesAccountNumber en settings(): keys={list(settings.keys())}")
+        raise RuntimeError(f"Could not find securitiesAccountNumber in settings(): keys={list(settings.keys())}")
 
     async def compact_portfolio_patched():
         return await tr.subscribe({"type": "compactPortfolio", "secAccNo": sec_acc_no})
@@ -90,6 +90,9 @@ def normalize_event(raw):
       - importe:   abs(value) rounded to 2 decimals.
       - type:      TR's eventType.
       - raw_value: the original signed value (used to classify expense/income).
+
+    Note: keys 'concepto' / 'importe' are kept in Spanish for compatibility
+    with downstream Sheet writers and existing tests.
     """
     amount_block = raw.get("amount") or {}
     value = amount_block.get("value")
@@ -150,7 +153,7 @@ def filter_events_by_flow(events):
             break
     for name, items in ignored.items():
         if items:
-            _ts.log.info(f"  [{name}] {len(items)} evento(s) ignorado(s) por config.yaml → ignore_events:")
+            _ts.log.info(f"  [{name}] {len(items)} event(s) ignored per config.yaml → ignore_events:")
             for n in items:
                 _ts.log.info(f"     - {n['ts'].date()}  {n['importe']:>8.2f} €  '{n['concepto']}'")
     return out

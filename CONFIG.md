@@ -1,52 +1,52 @@
-# Referencia de `config.yaml`
+# `config.yaml` reference
 
-Toda la configuración por usuario vive en `config.yaml`. Este fichero **no se commitea** (está en `.gitignore`). La plantilla limpia es `config.example.yaml`.
+All per-user configuration lives in `config.yaml`. This file **is not committed** (it's in `.gitignore`). The clean template is `config.example.yaml`.
 
-> Convención: las claves marcadas como **(obligatorio)** deben tener un valor real para que el script arranque. Las marcadas como **(opcional)** tienen un valor por defecto razonable.
+> Convention: keys marked as **(required)** must have a real value for the script to start. Those marked as **(optional)** have a sensible default.
 
 ---
 
-## Sumario
+## Summary
 
-| Sección | Campo | Tipo | Descripción |
+| Section | Field | Type | Description |
 |---|---|---|---|
-| `sheet_id` | string | obligatorio | ID del Google Sheet |
-| `sheets.expenses` | string | obligatorio | Nombre de la pestaña de gastos |
-| `sheets.income` | string | obligatorio | Nombre de la pestaña de ingresos |
-| `sheets.investments_year_format` | string | obligatorio | Patrón con `{year}` para la pestaña de inversiones |
-| `sheets.investments_year` | int / null | opcional | Fija el año fiscal; null = año actual |
-| `sheets.portfolio` | string | obligatorio | Nombre de la pestaña de portfolio |
-| `sheets.status` | string | obligatorio | Nombre de la pestaña de estado |
-| `sheets.sync_state` | string | obligatorio | Nombre de la pestaña oculta de dedup |
-| `summary_markers.expenses` | list[string] | obligatorio | Strings que marcan el bloque resumen en Gastos |
-| `summary_markers.income` | list[string] | obligatorio | Idem para Ingresos |
-| `status_labels` | dict | obligatorio | Etiquetas de la pestaña Estado sync |
-| `asset_name_map` | dict | obligatorio | TR-name → display-name para inversiones |
-| `portfolio_cell_map` | list[obj] | obligatorio | ISIN+label en orden vertical del rango |
-| `portfolio_value_range` | string | obligatorio | Rango A1 donde se escriben los netValue |
-| `crypto_isins` | list[string] | opcional | ISINs tratados como cripto |
-| `gift_cost_overrides` | dict | opcional | Override para regalos no parseables |
-| `ignore_events` | dict | opcional | Filtros para descartar eventos del sync |
-| `default_buffer_days` | int | opcional | Días buffer al descargar eventos |
-| `timezone` | string | opcional | Zona horaria (default `Europe/Madrid`) |
-| `saveback_label` | string | opcional | Label de la fila Saveback en Inversiones (default `SAVEBACK`) |
-| `init_sheet_headers` | dict | opcional | Cabeceras que escribe `make init-sheet` |
-| `subtitle_translations` | dict | opcional | Traducciones alemán → idioma del usuario (se mergean con default castellano) |
-| `renta_classification` | dict | opcional | Subtitles para clasificar dividendos/bonos en `make renta` |
-| `features` | dict | opcional | Toggles individuales por feature (`insights`, `concentration`, `backfill_snapshots`, etc.) — ver sección Features |
-| `concentration_threshold` | float | opcional | % global a partir del cual una posición se marca "alta concentración" cuando no tiene límite explícito (default `0.35`) |
-| `concentration_limits` | dict | opcional | Límite individual por ISIN (override del global). `{ISIN: 0.50, ...}` |
-| `asset_currencies` | dict | opcional | Mapeo `{ISIN: "USD"\|"EUR"\|"CRYPTO"\|...}` para el bloque de exposición por divisa en `make insights`. ISINs sin entrada → "UNKNOWN" |
-| `benchmark_isin` | string | opcional | ISIN contra el que comparar tu MWR (típicamente un ETF S&P 500). Activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. |
-| `benchmark_label` | string | opcional | Etiqueta humana del benchmark mostrada en el output (default: el propio ISIN). |
-| `sheets.snapshots` | string | opcional | Nombre de la pestaña oculta de snapshots agregados (default `_snapshots`) |
-| `sheets.snapshots_positions` | string | opcional | Nombre de la pestaña oculta de snapshots por posición (default `_snapshots_positions`) |
+| `sheet_id` | string | required | Google Sheet ID |
+| `sheets.expenses` | string | required | Name of the expenses tab |
+| `sheets.income` | string | required | Name of the income tab |
+| `sheets.investments_year_format` | string | required | Pattern with `{year}` for the investments tab |
+| `sheets.investments_year` | int / null | optional | Pins the fiscal year; null = current year |
+| `sheets.portfolio` | string | required | Name of the portfolio tab |
+| `sheets.status` | string | required | Name of the status tab |
+| `sheets.sync_state` | string | required | Name of the hidden dedup tab |
+| `summary_markers.expenses` | list[string] | required | Strings that mark the summary block in Gastos |
+| `summary_markers.income` | list[string] | required | Same for Ingresos |
+| `status_labels` | dict | required | Labels for the Estado sync tab |
+| `asset_name_map` | dict | required | TR-name → display-name for investments |
+| `portfolio_cell_map` | list[obj] | required | ISIN+label in the vertical order of the range |
+| `portfolio_value_range` | string | required | A1 range where netValues are written |
+| `crypto_isins` | list[string] | optional | ISINs treated as crypto |
+| `gift_cost_overrides` | dict | optional | Override for unparseable gifts |
+| `ignore_events` | dict | optional | Filters to discard events from the sync |
+| `default_buffer_days` | int | optional | Buffer days when downloading events |
+| `timezone` | string | optional | Time zone (default `Europe/Madrid`) |
+| `saveback_label` | string | optional | Label of the Saveback row in Investments (default `SAVEBACK`) |
+| `init_sheet_headers` | dict | optional | Headers written by `make init-sheet` |
+| `subtitle_translations` | dict | optional | German → user language translations (merged with default Spanish) |
+| `renta_classification` | dict | optional | Subtitles to classify dividends/bonds in `make renta` |
+| `features` | dict | optional | Per-feature toggles (`insights`, `concentration`, `backfill_snapshots`, etc.) — see Features section |
+| `concentration_threshold` | float | optional | Global % above which a position is flagged "high concentration" when it has no explicit limit (default `0.35`) |
+| `concentration_limits` | dict | optional | Per-ISIN cap (override of the global). `{ISIN: 0.50, ...}` |
+| `asset_currencies` | dict | optional | Mapping `{ISIN: "USD"\|"EUR"\|"CRYPTO"\|...}` for the currency exposure block in `make insights`. ISINs without an entry → "UNKNOWN" |
+| `benchmark_isin` | string | optional | ISIN to compare your MWR against (typically an S&P 500 ETF). Activates the "RETURN VS BENCHMARK" block in `make insights`. |
+| `benchmark_label` | string | optional | Human-readable label of the benchmark shown in the output (default: the ISIN itself). |
+| `sheets.snapshots` | string | optional | Name of the hidden tab with aggregated snapshots (default `_snapshots`) |
+| `sheets.snapshots_positions` | string | optional | Name of the hidden tab with per-position snapshots (default `_snapshots_positions`) |
 
 ---
 
-## `sheet_id` (obligatorio)
+## `sheet_id` (required)
 
-ID del Google Sheet, sale de la URL: `docs.google.com/spreadsheets/d/<ESTE_ID>/edit`.
+Google Sheet ID, taken from the URL: `docs.google.com/spreadsheets/d/<THIS_ID>/edit`.
 
 ```yaml
 sheet_id: "1AbcDef..."
@@ -54,42 +54,42 @@ sheet_id: "1AbcDef..."
 
 ---
 
-## `sheets` (obligatorio)
+## `sheets` (required)
 
-Nombres de las pestañas que el script va a leer/escribir. Si tu Sheet tiene nombres distintos a los del ejemplo, ajústalos aquí.
+Names of the tabs the script will read/write. If your Sheet has names different from the example, adjust them here.
 
 ```yaml
 sheets:
   expenses: "Gastos"
   income: "Ingresos"
   investments_year_format: "Dinero invertido {year}"
-  investments_year: null      # null = año actual; ej. 2025 para fijarlo
+  investments_year: null      # null = current year; e.g. 2025 to pin it
   portfolio: "Calculo ganancias"
   status: "Estado sync"
   sync_state: "_sync_state"
 ```
 
-| Campo | Notas |
+| Field | Notes |
 |---|---|
-| `expenses` | Pestaña con gastos. Layout configurable con `expenses_layout`. |
-| `income` | Pestaña con ingresos. Layout configurable con `income_layout`. |
-| `expenses_layout` / `income_layout` | `monthly_columns` (default; meses como pares de columnas Concepto+Importe + bloque resumen) o `ledger` (una fila por evento con Fecha/Concepto/Importe). |
-| `ledger_headers` | Solo si usas `ledger`. Lista de 3 strings con las cabeceras (default `["Fecha", "Concepto", "Importe"]`). |
-| `ledger_columns` | Solo si usas `ledger`. `{ date, concept, amount }` con la letra de columna A1 para cada campo (default A/B/C). Pueden no ser contiguas. |
-| `month_header_amount` / `month_header_concept` | Solo si usas `monthly_columns`. Plantillas con `{month}` y `{year}` para los headers de mes (defaults `"{month} {year}"` y `"Concepto {month}"`). |
-| `investments_year_format` | Cadena con `{year}` que se sustituye por el año fiscal en uso (p.ej. `"Dinero invertido 2026"`). |
-| `investments_year` | Si es `null`, el script usa el año actual. Si pones un año, lo fija (útil para retrocompatibilidad o inversiones en años pasados). También puedes sobrescribirlo con la env var `TR_SYNC_INVESTMENTS_YEAR`. |
-| `portfolio` | Pestaña con el snapshot de valor por activo. |
-| `status` | El script crea esta pestaña si no existe; muestra timestamps del último sync correcto. |
-| `sync_state` | Pestaña oculta donde el script guarda los IDs de eventos ya escritos para deduplicar. **No la edites a mano.** |
-| `snapshots` | Pestaña oculta con un snapshot por ejecución de `make insights`/`portfolio`/`backfill-snapshots`. Default `_snapshots`. **No la edites a mano.** |
-| `snapshots_positions` | Pestaña oculta con desglose por posición de cada snapshot. Default `_snapshots_positions`. **No la edites a mano.** |
+| `expenses` | Expenses tab. Layout configurable with `expenses_layout`. |
+| `income` | Income tab. Layout configurable with `income_layout`. |
+| `expenses_layout` / `income_layout` | `monthly_columns` (default; months as Concept+Amount column pairs + summary block) or `ledger` (one row per event with Date/Concept/Amount). |
+| `ledger_headers` | Only if you use `ledger`. List of 3 strings with the headers (default `["Fecha", "Concepto", "Importe"]`). |
+| `ledger_columns` | Only if you use `ledger`. `{ date, concept, amount }` with the A1 column letter for each field (default A/B/C). Can be non-contiguous. |
+| `month_header_amount` / `month_header_concept` | Only if you use `monthly_columns`. Templates with `{month}` and `{year}` for month headers (defaults `"{month} {year}"` and `"Concepto {month}"`). |
+| `investments_year_format` | String with `{year}` that gets substituted by the active fiscal year (e.g. `"Dinero invertido 2026"`). |
+| `investments_year` | If `null`, the script uses the current year. If you set a year, it's pinned (useful for backwards compatibility or investments in past years). You can also override it with the env var `TR_SYNC_INVESTMENTS_YEAR`. |
+| `portfolio` | Tab with the per-asset value snapshot. |
+| `status` | The script creates this tab if it doesn't exist; shows timestamps of the last successful sync. |
+| `sync_state` | Hidden tab where the script stores the IDs of already-written events for dedup. **Don't edit it by hand.** |
+| `snapshots` | Hidden tab with one snapshot per execution of `make insights`/`portfolio`/`backfill-snapshots`. Default `_snapshots`. **Don't edit it by hand.** |
+| `snapshots_positions` | Hidden tab with per-position breakdown of each snapshot. Default `_snapshots_positions`. **Don't edit it by hand.** |
 
 ---
 
-## `summary_markers` (obligatorio)
+## `summary_markers` (required)
 
-Strings (case-insensitive) que el script busca en la columna de concepto de cada mes para detectar el bloque resumen final. Cuando inserta filas nuevas, las pone justo encima del primer marker que encuentra.
+Strings (case-insensitive) that the script searches in the concept column of each month to detect the final summary block. When inserting new rows, it places them right above the first marker it finds.
 
 ```yaml
 summary_markers:
@@ -103,13 +103,13 @@ summary_markers:
     - "totales"
 ```
 
-> Si tu hoja no tiene bloque resumen, deja la lista vacía. El script entonces escribirá al final de cada columna sin desplazar nada.
+> If your sheet doesn't have a summary block, leave the list empty. The script will then write at the end of each column without shifting anything.
 
 ---
 
-## `status_labels` (obligatorio)
+## `status_labels` (required)
 
-Etiquetas que aparecen en la columna A de la pestaña "Estado sync".
+Labels that appear in column A of the "Estado sync" tab.
 
 ```yaml
 status_labels:
@@ -119,9 +119,9 @@ status_labels:
 
 ---
 
-## `asset_name_map` (obligatorio para inversiones)
+## `asset_name_map` (required for investments)
 
-Mapeo del nombre que TR usa para cada activo (clave) al nombre que tienes en la pestaña "Dinero invertido" (valor). Si TR envía un asset que no está en este mapa, el script crea una nueva fila con el título original y avisa.
+Mapping from the name TR uses for each asset (key) to the name you have in the "Dinero invertido" tab (value). If TR sends an asset that's not in this map, the script creates a new row with the original title and warns.
 
 ```yaml
 asset_name_map:
@@ -133,16 +133,16 @@ asset_name_map:
   "MSCI World Small Cap USD (Acc)": "SMALL CAPS"
 ```
 
-Para descubrir el nombre exacto que TR usa, lánzalo:
+To discover the exact name TR uses, run:
 ```bash
 .venv/bin/python inspect_events.py --eventtype TRADING_SAVINGSPLAN_EXECUTED
 ```
 
 ---
 
-## `portfolio_cell_map` (obligatorio)
+## `portfolio_cell_map` (required)
 
-Lista ordenada de los ISINs cuyo valor actual quieres escribir en la pestaña "Calculo ganancias". El **orden** importa: la primera entrada va a la primera fila del rango, etc.
+Ordered list of the ISINs whose current value you want written to the "Calculo ganancias" tab. **Order matters**: the first entry goes to the first row of the range, etc.
 
 ```yaml
 portfolio_cell_map:
@@ -155,13 +155,13 @@ portfolio_cell_map:
   - { isin: "XF000SOL0012", label: "solana" }
 ```
 
-El `label` solo se usa para el log de consola; lo importante es el ISIN y el orden.
+The `label` is only used for the console log; what matters is the ISIN and the order.
 
 ---
 
-## `portfolio_value_range` (obligatorio)
+## `portfolio_value_range` (required)
 
-Rango A1 donde el script escribe los `netValue` actuales. Debe ser una columna y tener tantas celdas como entradas en `portfolio_cell_map`.
+A1 range where the script writes the current `netValue`s. Must be a single column with as many cells as entries in `portfolio_cell_map`.
 
 ```yaml
 portfolio_value_range: "C2:C8"
@@ -169,9 +169,9 @@ portfolio_value_range: "C2:C8"
 
 ---
 
-## `crypto_isins` (opcional)
+## `crypto_isins` (optional)
 
-ISINs que el script trata como criptomonedas para la sección "Posición cripto" del informe IRPF (informativo Modelo 721).
+ISINs that the script treats as cryptocurrencies for the "Posición cripto" section of the IRPF report (informative for Modelo 721).
 
 ```yaml
 crypto_isins:
@@ -180,9 +180,9 @@ crypto_isins:
 
 ---
 
-## `gift_cost_overrides` (opcional)
+## `gift_cost_overrides` (optional)
 
-Override manual para regalos (`GIFTING_RECIPIENT_ACTIVITY` / `GIFTING_LOTTERY_PRIZE_ACTIVITY`) cuyos detalles el script no sabe parsear. Rellena el coste y las shares con el dato exacto del PDF "Jährlicher Steuerbericht" de TR.
+Manual override for gifts (`GIFTING_RECIPIENT_ACTIVITY` / `GIFTING_LOTTERY_PRIZE_ACTIVITY`) whose details the script can't parse. Fill the cost and shares with the exact data from TR's "Jährlicher Steuerbericht" PDF.
 
 ```yaml
 gift_cost_overrides:
@@ -193,15 +193,15 @@ gift_cost_overrides:
 
 ---
 
-## `ignore_events` (opcional)
+## `ignore_events` (optional)
 
-Patrones para descartar eventos del sync. Útil para nóminas y autotransferencias que ya gestionas a mano. Match **case-insensitive** y por **substring**.
+Patterns to discard events from the sync. Useful for salaries and auto-transfers you already handle manually. Match is **case-insensitive** and by **substring**.
 
 ```yaml
 ignore_events:
   income:
     title_contains:
-      - "tu nombre"           # autotransferencias entrantes
+      - "your name"           # incoming auto-transfers
       - "imagin"
     subtitle_contains: []
   expenses:
@@ -209,13 +209,13 @@ ignore_events:
     subtitle_contains: []
 ```
 
-Cuando un evento matchea, el script lo loggea con detalle (fecha + importe + título) durante el sync. Lee [README → Ignorar eventos](README.md#ignorar-eventos) para ejemplos.
+When an event matches, the script logs it in detail (date + amount + title) during the sync. Read [README → Ignoring events](README.md#ignoring-events) for examples.
 
 ---
 
-## `default_buffer_days` (opcional, default `7`)
+## `default_buffer_days` (optional, default `7`)
 
-Días de buffer antes del inicio del mes actual al descargar eventos. Sirve para coger eventos del último día del mes anterior que pudieron tardar en aparecer.
+Buffer days before the start of the current month when downloading events. Useful to catch events from the last day of the previous month that may have taken time to appear.
 
 ```yaml
 default_buffer_days: 7
@@ -223,9 +223,9 @@ default_buffer_days: 7
 
 ---
 
-## `timezone` (opcional, default `Europe/Madrid`)
+## `timezone` (optional, default `Europe/Madrid`)
 
-Zona horaria con la que se interpretan los timestamps de TR (que vienen en UTC). Cualquier zona válida de IANA.
+Time zone in which TR timestamps (which come in UTC) are interpreted. Any valid IANA zone.
 
 ```yaml
 timezone: "Europe/Madrid"
@@ -233,9 +233,9 @@ timezone: "Europe/Madrid"
 
 ---
 
-## `saveback_label` (opcional, default `"SAVEBACK"`)
+## `saveback_label` (optional, default `"SAVEBACK"`)
 
-Texto que aparece en la columna A de la pestaña "Dinero invertido" para la fila que agrega los Saveback. Si tu pestaña tiene otra etiqueta para esa fila (p.ej. `"Cashback ETF"`), pon el mismo string aquí.
+Text that appears in column A of the "Dinero invertido" tab for the row that aggregates Saveback. If your tab has another label for that row (e.g. `"Cashback ETF"`), put the same string here.
 
 ```yaml
 saveback_label: "SAVEBACK"
@@ -243,97 +243,97 @@ saveback_label: "SAVEBACK"
 
 ---
 
-## `init_sheet_headers` (opcional)
+## `init_sheet_headers` (optional)
 
-Cabeceras que escribe `make init-sheet` cuando crea pestañas vacías la primera vez. Útil si quieres usar el script en otro idioma o con otra terminología.
+Headers that `make init-sheet` writes when it creates empty tabs the first time. Useful if you want to use the script in another language or with different terminology.
 
 ```yaml
 init_sheet_headers:
-  investments_asset_column: "Activo"      # cabecera col A en pestaña Inversiones
-  portfolio_asset_column: "Activo"        # cabecera col labels en pestaña Portfolio
-  portfolio_value_column: "Valor (€)"     # cabecera col valores en pestaña Portfolio
+  investments_asset_column: "Activo"      # col A header in Investments tab
+  portfolio_asset_column: "Activo"        # labels col header in Portfolio tab
+  portfolio_value_column: "Valor (€)"     # values col header in Portfolio tab
 ```
 
 ---
 
-## `subtitle_translations` (opcional)
+## `subtitle_translations` (optional)
 
-Diccionario adicional de traducciones alemán → idioma del usuario. La API de TR responde siempre en alemán; aquí pones las traducciones que quieres ver en consola y en la Sheet. Tu config se **mergea** con el default (castellano), así que solo necesitas listar las que cambies.
+Additional dictionary of German → user-language translations. The TR API always responds in German; here you put the translations you want to see in console and in the Sheet. Your config is **merged** with the default (Spanish), so you only need to list the ones you change.
 
 ```yaml
 subtitle_translations:
-  "Bardividende": "Cash dividend"           # ejemplo: usar inglés
+  "Bardividende": "Cash dividend"           # example: use English
   "Verkaufsorder": "Sell order"
   "Endgültige Fälligkeit": "Final maturity"
 ```
 
-Si TR introduce un nuevo subtitle que no está en el default, añádelo aquí.
+If TR introduces a new subtitle that's not in the default, add it here.
 
 ---
 
-## `features` (opcional)
+## `features` (optional)
 
-Toggles por feature. Por defecto **todas las features están activadas**; añade entradas aquí solo si quieres apagar alguna.
+Per-feature toggles. By default **all features are enabled**; only add entries here if you want to turn one off.
 
 ```yaml
 features:
-  expenses: true              # sync de gastos
-  income: true                # sync de ingresos
-  investments: true           # sync de "Dinero invertido YYYY"
-  portfolio: true             # snapshot a "Calculo ganancias"
-  renta: true                 # informe IRPF
-  insights: true              # patrimonio + rentabilidad + concentración
-  concentration: true         # bloque de concentración dentro de insights
-  snapshot_persist: true      # guardar snapshots automáticos en cada ejecución
-  backfill_snapshots: true    # reconstrucción histórica de snapshots
-  saveback_metrics: true      # plusvalía descontando saveback
+  expenses: true              # expenses sync
+  income: true                # income sync
+  investments: true           # sync of "Dinero invertido YYYY"
+  portfolio: true             # snapshot to "Calculo ganancias"
+  renta: true                 # IRPF report
+  insights: true              # net worth + returns + concentration
+  concentration: true         # concentration block within insights
+  snapshot_persist: true      # save automatic snapshots on each run
+  backfill_snapshots: true    # historical reconstruction of snapshots
+  saveback_metrics: true      # unrealized return discounting saveback
 ```
 
-Una feature solo se ejecuta si **(a)** está activada aquí Y **(b)** el broker activo soporta sus capabilities. Para ver el estado actual: `make features`.
+A feature only runs if **(a)** it's enabled here AND **(b)** the active broker supports its capabilities. To see the current state: `make features`.
 
 ```
 $ make features
-Feature                Config   Soporte   Efectiva   Descripción
+Feature                Config   Support   Effective  Description
 ---------------------- -------- --------- ---------- ----------------------------------------
-insights               ✓        ✓         ✓ ON       Patrimonio, rentabilidad TR-style + propio, MWR…
-concentration          ✓        ✓         ✓ ON       Distribución de cartera por posición + alerta…
-saveback_metrics       ✓        ✓         ✓ ON       Plusvalía descontando saveback (cuando el broker tiene saveback)
+insights               ✓        ✓         ✓ ON       Net worth, TR-style returns + own, MWR…
+concentration          ✓        ✓         ✓ ON       Per-position portfolio distribution + alert…
+saveback_metrics       ✓        ✓         ✓ ON       Unrealized return discounting saveback (when broker has saveback)
 …
 ```
 
-Cuando llegue un segundo broker que no tenga (p.ej.) saveback, `saveback_metrics` saldrá `Soporte ✗ → Efectiva ✗ off` automáticamente.
+When a second broker arrives that lacks (e.g.) saveback, `saveback_metrics` will show `Support ✗ → Effective ✗ off` automatically.
 
 ---
 
-## `concentration_threshold` (opcional)
+## `concentration_threshold` (optional)
 
-Float entre 0 y 1, o `null`. Define el % global a partir del cual una posición se marca como "alta concentración" en `make insights`. Default `0.35` (35%). Solo aplica a ISINs sin entrada en `concentration_limits`.
+Float between 0 and 1, or `null`. Defines the global % above which a position is flagged as "high concentration" in `make insights`. Default `0.35` (35%). Only applies to ISINs without an entry in `concentration_limits`.
 
 ```yaml
 concentration_threshold: 0.40   # 40%
-concentration_threshold: null   # apaga el global; solo alertan ISINs con límite explícito
+concentration_threshold: null   # turns off the global; only ISINs with explicit limit will alert
 ```
 
-`null` es útil cuando solo te importa la concentración de **algunos activos concretos** (típico: cripto) y los demás te dan igual cómo se repartan.
+`null` is useful when you only care about the concentration of **a few specific assets** (typical: crypto) and you don't mind how the rest are distributed.
 
 ---
 
-## `concentration_limits` (opcional)
+## `concentration_limits` (optional)
 
-Dict `{ISIN: float}` con el límite individual de cada activo en la cartera. Sobrescribe el `concentration_threshold` para los ISINs presentes. Útil cuando piensas la cartera con tolerancias distintas por activo (core ETFs altas, cripto bajas).
+Dict `{ISIN: float}` with the individual cap of each asset in the portfolio. Overrides `concentration_threshold` for the listed ISINs. Useful when you think of the portfolio with different tolerances per asset (high for core ETFs, low for crypto).
 
 ```yaml
 concentration_limits:
-  IE00B5BMR087: 0.50    # Core SP500: 50% (es core, tolerancia alta)
+  IE00B5BMR087: 0.50    # Core SP500: 50% (it's core, high tolerance)
   IE00B3WJKG14: 0.20    # SP500 Tech: 20%
   IE00BKM4GZ66: 0.20    # EM IMI: 20%
   IE00BF4RFH31: 0.15    # Small Cap: 15%
   IE00B4K48X80: 0.15    # MSCI Europe: 15%
   IE00BZCQB185: 0.10    # MSCI India: 10%
-  XF000SOL0012: 0.08    # Solana: 8% (cripto, tolerancia baja)
+  XF000SOL0012: 0.08    # Solana: 8% (crypto, low tolerance)
 ```
 
-Comportamiento en `make insights`:
+Behavior in `make insights`:
 
 ```
 CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
@@ -344,13 +344,13 @@ CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
   ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
-ISINs **sin entrada** caen al `concentration_threshold` global (marcado como "(global)" en el output para que sepas distinguirlo).
+ISINs **without an entry** fall back to the global `concentration_threshold` (marked as "(global)" in the output so you can tell them apart).
 
 ---
 
-## `asset_currencies` (opcional)
+## `asset_currencies` (optional)
 
-Mapeo `{ISIN: divisa}` que `make insights` usa para mostrar tu exposición por divisa de denominación. Sin esto, el bloque no se muestra.
+Mapping `{ISIN: currency}` that `make insights` uses to show your exposure by denomination currency. Without this, the block isn't shown.
 
 ```yaml
 asset_currencies:
@@ -363,9 +363,9 @@ asset_currencies:
   XF000SOL0012: CRYPTO  # Solana
 ```
 
-ISINs sin entrada caen en el bucket "UNKNOWN" y se avisa en el output. El cash de la cuenta TR siempre se cuenta como EUR.
+ISINs without an entry fall into the "UNKNOWN" bucket and a warning is printed. The cash in the TR account is always counted as EUR.
 
-Output esperado en `make insights`:
+Expected output in `make insights`:
 
 ```
 EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
@@ -376,20 +376,20 @@ EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
 
 ---
 
-## `benchmark_isin` (opcional) y `benchmark_label`
+## `benchmark_isin` (optional) and `benchmark_label`
 
-ISIN contra el que comparar tu MWR. Activa el bloque "RENTABILIDAD VS BENCHMARK" en `make insights`. Útil para responder a "¿estoy batiendo al mercado o me arrastra?" — sin esto, el MWR está en el aire.
+ISIN to compare your MWR against. Activates the "RETURN VS BENCHMARK" block in `make insights`. Useful to answer "am I beating the market or is it dragging me?" — without this, the MWR is in a vacuum.
 
 ```yaml
 benchmark_isin: IE00B5BMR087
 benchmark_label: "Core S&P 500 USD"
 ```
 
-El script descarga el histórico de precios del benchmark vía la misma API que usa el backfill (`aggregateHistoryLight`), calcula su rendimiento anualizado en los mismos periodos que tu MWR (all-time / YTD / 12m), y muestra una tabla con la diferencia en puntos porcentuales.
+The script downloads the benchmark's price history via the same API used by backfill (`aggregateHistoryLight`), computes its annualized return over the same periods as your MWR (all-time / YTD / 12m), and shows a table with the difference in percentage points.
 
-Asume que el benchmark es **acumulación** (re-invierte dividendos en el precio). Si fuera de distribución, el rendimiento mostrado quedaría conservador (no incluiría los dividendos cobrados).
+It assumes the benchmark is **accumulating** (reinvests dividends in price). If it were distributing, the displayed return would be conservative (it wouldn't include collected dividends).
 
-Output esperado:
+Expected output:
 
 ```
 RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
@@ -400,13 +400,13 @@ RENTABILIDAD VS BENCHMARK (Core S&P 500 USD)
   12 meses              +25.17 %         +18.90 %          +6.27 pp ✓
 ```
 
-`✓` aparece cuando bates al benchmark en ese periodo. Sin marca = igual o por debajo.
+`✓` appears when you beat the benchmark in that period. No mark = equal or below.
 
 ---
 
-## `renta_classification` (opcional)
+## `renta_classification` (optional)
 
-Subtitles alemanes que TR usa en eventos `SSP_CORPORATE_ACTION_CASH` para clasificar el evento (dividendo, cupón de bono, amortización). Si TR cambia o añade un nuevo subtitle, parchea aquí sin tocar código.
+German subtitles that TR uses in `SSP_CORPORATE_ACTION_CASH` events to classify the event (dividend, bond coupon, maturity). If TR changes or adds a new subtitle, patch here without touching code.
 
 ```yaml
 renta_classification:
@@ -421,14 +421,14 @@ renta_classification:
     - "Endgültige Fälligkeit"
 ```
 
-Solo necesitas redefinir las que quieras cambiar; el resto cae al default.
+You only need to redefine the ones you want to change; the rest fall back to the default.
 
 ---
 
-## Variables de entorno que sobrescriben config
+## Environment variables that override config
 
-Estas variables tienen prioridad sobre lo que pongas en `config.yaml`:
+These variables take priority over what you put in `config.yaml`:
 
-| Variable | Sobreescribe |
+| Variable | Overrides |
 |---|---|
 | `TR_SYNC_INVESTMENTS_YEAR` | `sheets.investments_year` |

@@ -40,7 +40,7 @@ def aggregate_investments(events):
             asset = ASSET_NAME_MAP.get(title)
             if asset is None:
                 if title not in seen_unknown:
-                    log.warning(f"   activo desconocido en TR: '{title}' → fila nueva con ese nombre")
+                    log.warning(f"   unknown asset in TR: '{title}' → new row with that name")
                     seen_unknown.add(title)
                 asset = title
         value = (raw.get("amount") or {}).get("value")
@@ -70,10 +70,10 @@ def sync_investments(spreadsheet, events, dry_run):
         and (y > now.year or (y == now.year and m >= now.month))
     }
     if not totals:
-        log.info("\n[Inversiones] nada que actualizar (mes actual o futuros)")
+        log.info("\n[Investments] nothing to update (current or future months)")
         return
 
-    log.info(f"\n[Inversiones] {len(totals)} celdas a actualizar:")
+    log.info(f"\n[Investments] {len(totals)} cells to update:")
     for (asset, year, month), v in sorted(totals.items()):
         log.info(f"   {asset:<14} / {MONTH_NAMES_ES[month-1]} {year}: {v:>8.2f}")
 
@@ -83,7 +83,7 @@ def sync_investments(spreadsheet, events, dry_run):
     try:
         worksheet = spreadsheet.worksheet(INVESTMENTS_SHEET)
     except gspread.exceptions.WorksheetNotFound:
-        log.warning(f"   pestaña '{INVESTMENTS_SHEET}' no encontrada — salto inversiones")
+        log.warning(f"   tab '{INVESTMENTS_SHEET}' not found — skipping investments")
         return
 
     col_a = worksheet.col_values(1)
@@ -96,7 +96,7 @@ def sync_investments(spreadsheet, events, dry_run):
             new_row = max(asset_to_row.values(), default=1) + 1
             worksheet.update_cell(new_row, 1, asset)
             asset_to_row[asset] = new_row
-            log.info(f"   nueva fila '{asset}' en {new_row}")
+            log.info(f"   new row '{asset}' at {new_row}")
 
     for (year, month) in sorted({(y, m) for (_, y, m) in totals.keys()}):
         header = f"{MONTH_NAMES_ES[month-1]} {year}".lower()
@@ -105,11 +105,11 @@ def sync_investments(spreadsheet, events, dry_run):
             month_str = f"{MONTH_NAMES_ES[month-1]} {year}"
             worksheet.update_cell(1, new_col, month_str)
             month_to_col[header] = new_col
-            log.info(f"   nueva columna '{month_str}' en {new_col}")
+            log.info(f"   new column '{month_str}' at {new_col}")
 
     cells = []
     for (asset, year, month), value in totals.items():
         header = f"{MONTH_NAMES_ES[month-1]} {year}".lower()
         cells.append(gspread.cell.Cell(asset_to_row[asset], month_to_col[header], round(value, 2)))
     worksheet.update_cells(cells, value_input_option="USER_ENTERED")
-    log.info(f"   {len(cells)} celdas escritas")
+    log.info(f"   {len(cells)} cells written")

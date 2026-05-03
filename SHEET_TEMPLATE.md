@@ -1,57 +1,57 @@
-# Estructura esperada del Google Sheet
+# Expected Google Sheet structure
 
-Este script asume una estructura específica en tu Google Sheet. Aquí se describe qué pestañas necesita y cómo deben estar organizadas.
+This script assumes a specific structure in your Google Sheet. Below is a description of which tabs it needs and how they should be organized.
 
-> **Atajo automático**: una vez tengas `config.yaml` con tu `sheet_id` y hayas autenticado gspread, lanza:
+> **Automatic shortcut**: once you have `config.yaml` with your `sheet_id` and have authenticated gspread, run:
 > ```bash
 > make init-sheet
 > ```
-> que creará las pestañas que falten con la estructura mínima (idempotente: si ya existen, no las toca). El bloque resumen de Gastos/Ingresos lo añades tú a mano si lo quieres.
+> which will create any missing tabs with the minimum structure (idempotent: if they already exist, it doesn't touch them). The summary block of Gastos/Ingresos you add by hand if you want it.
 >
-> Si prefieres crearlo todo a mano o personalizar la estructura, sigue las instrucciones de abajo.
+> If you prefer to create everything by hand or customize the structure, follow the instructions below.
 
-Los nombres de pestañas son configurables en `config.yaml` (sección `sheets`); aquí se usan los valores por defecto.
+Tab names are configurable in `config.yaml` (`sheets` section); here the default values are used.
 
 ---
 
-## 1. Pestaña `Gastos`
+## 1. `Gastos` tab
 
-Estructura **por meses en columnas**, no en filas. Cada mes ocupa **dos columnas adyacentes**: concepto + importe.
+**Months in columns** structure, not in rows. Each month occupies **two adjacent columns**: concept + amount.
 
-Ejemplo:
+Example:
 
 | A (Concepto enero 2026) | B (Importe enero 2026) | C (Concepto febrero 2026) | D (Importe febrero 2026) | … |
 |---|---|---|---|---|
 | Mercadona | -32,50 | Apple | -9,99 | … |
 | Carrefour | -45,00 | Spotify | -10,99 | … |
 | ... | ... | ... | ... | … |
-| **gastos innecesarios** | =SUMA(...) | **gastos innecesarios** | =SUMA(...) | … |
-| **gastos totales** | =SUMA(...) | **gastos totales** | =SUMA(...) | … |
+| **gastos innecesarios** | =SUM(...) | **gastos innecesarios** | =SUM(...) | … |
+| **gastos totales** | =SUM(...) | **gastos totales** | =SUM(...) | … |
 | **extraordinarios** | … | **extraordinarios** | … | … |
 
-**Headers de mes (fila 1)**: el script busca cabeceras en la **fila 1** con el patrón `"<mes en español> <año>"` para concepto y `"importe <mes> <año>"` (case-insensitive) para importe. Ejemplos válidos:
-- `enero 2026` (columna concepto) y `importe enero 2026` (columna importe)
-- `Febrero 2026` y `Importe febrero 2026`
+**Month headers (row 1)**: the script looks for headers in **row 1** with the pattern `"<month in Spanish> <year>"` for concept and `"importe <month> <year>"` (case-insensitive) for amount. Valid examples:
+- `enero 2026` (concept column) and `importe enero 2026` (amount column)
+- `Febrero 2026` and `Importe febrero 2026`
 
-**Bloque resumen al final** (configurable): el script detecta el final de cada mes buscando alguno de estos textos en la columna de concepto:
+**Summary block at the end** (configurable): the script detects the end of each month by looking for any of these texts in the concept column:
 - `gastos innecesarios`
 - `gastos totales`
 - `extraordinarios`
 
-Cuando sincroniza, **inserta filas nuevas justo encima** del bloque resumen y desplaza el resumen hacia abajo.
+When syncing, it **inserts new rows just above** the summary block and shifts the summary down.
 
-## 2. Pestaña `Ingresos`
+## 2. `Ingresos` tab
 
-Misma estructura que Gastos, pero los markers de resumen son:
+Same structure as Gastos, but the summary markers are:
 - `ingresos totales`
 - `ingresos`
 - `totales`
 
-## 3. Pestaña `Dinero invertido {YYYY}`
+## 3. `Dinero invertido {YYYY}` tab
 
-Resumen de inversiones (savings plan + saveback + compras manuales) por mes y por activo.
+Investment summary (savings plan + saveback + manual purchases) by month and by asset.
 
-| A (Activo) | B | C | … (un mes por columna) |
+| A (Activo) | B | C | … (one month per column) |
 |---|---|---|---|
 | | enero 2026 | febrero 2026 | … |
 | SP 500 | 240 | 240 | |
@@ -62,22 +62,22 @@ Resumen de inversiones (savings plan + saveback + compras manuales) por mes y po
 | Solana | 50 | 50 | |
 | SAVEBACK | 15,32 | | |
 
-- **Fila 1**: cabecera con el formato `<mes> <año>` (los mismos meses que en Gastos).
-- **Columna A**: nombre del activo. Debe coincidir con el valor del `asset_name_map` en `config.yaml`. Si TR envía un asset que no está mapeado, el script crea una nueva fila con el título original y avisa.
-- El script **solo sobrescribe** las celdas del mes actual y posteriores; los meses pasados nunca se tocan.
+- **Row 1**: header with the format `<month> <year>` (the same months as in Gastos).
+- **Column A**: asset name. Must match the value in `asset_name_map` in `config.yaml`. If TR sends an asset that is not mapped, the script creates a new row with the original title and warns.
+- The script **only overwrites** the cells of the current month and later; past months are never touched.
 
-El año de esta pestaña se controla en `config.yaml`:
+The year of this tab is controlled in `config.yaml`:
 ```yaml
 sheets:
   investments_year_format: "Dinero invertido {year}"
-  investments_year: null   # null = año actual
+  investments_year: null   # null = current year
 ```
 
-## 4. Pestaña `Calculo ganancias`
+## 4. `Calculo ganancias` tab
 
-Snapshot del valor actual de cada activo de tu cartera. El script **solo escribe** un rango concreto de la columna C.
+Snapshot of the current value of each portfolio asset. The script **only writes** a specific range of column C.
 
-| A (Activo) | B (algo opcional) | C (valor actual €) |
+| A (Asset) | B (something optional) | C (current value €) |
 |---|---|---|
 | sp500 | … | 1234,56 |
 | sp500 tech | … | 567,89 |
@@ -87,74 +87,74 @@ Snapshot del valor actual de cada activo de tu cartera. El script **solo escribe
 | india | … | 123,45 |
 | solana | … | 67,89 |
 
-- El **rango exacto** y los ISINs que se escriben se configuran en `config.yaml`:
+- The **exact range** and the ISINs that get written are configured in `config.yaml`:
   ```yaml
-  portfolio_value_range: "C2:C8"   # tantas filas como entradas en portfolio_cell_map
+  portfolio_value_range: "C2:C8"   # as many rows as entries in portfolio_cell_map
   portfolio_cell_map:
     - { isin: "IE00B5BMR087", label: "sp500" }
     - { isin: "IE00B3WJKG14", label: "sp500 tech" }
     - ...
   ```
-- El script no toca los headers ni las columnas A/B; solo escribe los netValue en el rango configurado.
+- The script doesn't touch the headers or columns A/B; it only writes the netValue in the configured range.
 
-## 5. Pestaña `Estado sync`
+## 5. `Estado sync` tab
 
-Pestaña pequeña con dos columnas que el script **crea automáticamente** si no existe. Sirve como recordatorio visual de la última vez que sincronizaste.
+Small tab with two columns that the script **creates automatically** if it doesn't exist. Serves as a visual reminder of the last time you synced.
 
-| A (Proceso) | B (Último OK) |
+| A (Process) | B (Last OK) |
 |---|---|
 | Portfolio | 2026-04-25 09:30:12 |
 | Sync completo | 2026-04-25 09:31:45 |
 
-Las etiquetas de la columna A se configuran en `config.yaml`:
+Column A labels are configured in `config.yaml`:
 ```yaml
 status_labels:
   portfolio: "Portfolio"
   sync: "Sync completo"
 ```
 
-## 6. Pestaña `_sync_state` (oculta)
+## 6. `_sync_state` tab (hidden)
 
-Pestaña interna que el script crea automáticamente para deduplicar eventos ya sincronizados. **No la borres ni la edites a mano**. Se oculta automáticamente.
+Internal tab the script creates automatically to dedup already-synced events. **Don't delete or edit by hand.** It's hidden automatically.
 
-## 6.1 Pestaña `_snapshots` (oculta)
+## 6.1 `_snapshots` tab (hidden)
 
-Pestaña que el script crea automáticamente al ejecutar `make insights`, `make portfolio` o `make backfill-snapshots`. Una fila por snapshot:
+Tab the script creates automatically when running `make insights`, `make portfolio`, or `make backfill-snapshots`. One row per snapshot:
 
 | ts | cash_eur | positions_value_eur | cost_basis_eur | total_eur |
 |---|---|---|---|---|
 | 2026-04-26T13:50:13.411535+02:00 | 13127,46 | 9423,89 | 8424,2 | 22551,35 |
 
-Se usa para calcular MWR YTD / 12 meses (necesita el valor de las posiciones al inicio del periodo). **No la borres ni la edites a mano.** El nombre se puede cambiar en `config.yaml > sheets.snapshots`.
+Used to compute MWR YTD / 12 months (needs the value of positions at the start of the period). **Don't delete or edit by hand.** The name can be changed in `config.yaml > sheets.snapshots`.
 
-## 6.2 Pestaña `_snapshots_positions` (oculta)
+## 6.2 `_snapshots_positions` tab (hidden)
 
-Mismo patrón pero con desglose por posición. Una fila por (snapshot, ISIN):
+Same pattern but with per-position breakdown. One row per (snapshot, ISIN):
 
 | ts | isin | title | shares | net_value_eur | cost_basis_eur |
 |---|---|---|---|---|---|
 | 2026-04-26T13:50:13… | IE00B5BMR087 | Core S&P 500 USD | 6.97 | 4205,81 | 3577,44 |
 
-Útil para gráficas de evolución por activo a lo largo del tiempo. El nombre se puede cambiar en `config.yaml > sheets.snapshots_positions`.
+Useful for per-asset evolution charts over time. The name can be changed in `config.yaml > sheets.snapshots_positions`.
 
-## 7. Pestaña `Renta YYYY` (la crea `make renta`)
+## 7. `Renta YYYY` tab (created by `make renta`)
 
-Cuando ejecutas `make renta`, el script crea/sobrescribe esta pestaña con el informe IRPF completo (FIFO + dividendos + intereses + bonos + posición Modelo 720). No hay que crearla a mano.
+When you run `make renta`, the script creates/overwrites this tab with the full IRPF report (FIFO + dividends + interest + bonds + Modelo 720 position). No need to create it by hand.
 
 ---
 
-## Resumen de pestañas
+## Tab summary
 
-| Pestaña | ¿Crear a mano? | ¿La toca el script? |
+| Tab | Create by hand? | Does the script touch it? |
 |---|---|---|
-| `Gastos` | Sí (con headers + bloque resumen) | Inserta filas |
-| `Ingresos` | Sí (con headers + bloque resumen) | Inserta filas |
-| `Dinero invertido YYYY` | Sí (con headers de mes + filas de activos) | Sobrescribe celdas mes actual+ |
-| `Calculo ganancias` | Sí | Sobrescribe rango configurado |
-| `Estado sync` | No (auto) | Lee/escribe |
-| `_sync_state` | No (auto, oculta) | Lee/escribe |
-| `_snapshots` | No (auto, oculta) | Lee/append (insights, portfolio, backfill) |
-| `_snapshots_positions` | No (auto, oculta) | Append (insights, portfolio, backfill) |
-| `Renta YYYY` | No (auto, lo crea `make renta`) | Sobrescribe entera |
+| `Gastos` | Yes (with headers + summary block) | Inserts rows |
+| `Ingresos` | Yes (with headers + summary block) | Inserts rows |
+| `Dinero invertido YYYY` | Yes (with month headers + asset rows) | Overwrites cells from current month onward |
+| `Calculo ganancias` | Yes | Overwrites configured range |
+| `Estado sync` | No (auto) | Reads/writes |
+| `_sync_state` | No (auto, hidden) | Reads/writes |
+| `_snapshots` | No (auto, hidden) | Reads/append (insights, portfolio, backfill) |
+| `_snapshots_positions` | No (auto, hidden) | Append (insights, portfolio, backfill) |
+| `Renta YYYY` | No (auto, created by `make renta`) | Overwrites entirely |
 
-Si tu Sheet tiene otra estructura, **edita los nombres de pestañas y markers en `config.yaml`** o adapta el código.
+If your Sheet has another structure, **edit the tab names and markers in `config.yaml`** or adapt the code.

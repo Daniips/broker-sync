@@ -280,7 +280,7 @@ class ConcentrationTests(unittest.TestCase):
             Position(isin="B", title="B", net_value_eur=1000, broker="t"),
         )
         s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
-        # Solo A tiene límite explícito; B usa default_threshold
+        # Only A has an explicit limit; B uses default_threshold
         c = concentration(s, limits={"A": 0.50}, default_threshold=0.30)
         a = next(x for x in c if x["isin"] == "A")
         b = next(x for x in c if x["isin"] == "B")
@@ -462,7 +462,7 @@ class WealthTests(unittest.TestCase):
 
 class UnrealizedReturnTests(unittest.TestCase):
     def test_matches_tr_app_style(self):
-        # Cost basis 8000, value 9280 → +16% plusvalía latente
+        # Cost basis 8000, value 9280 → +16% unrealized P&L
         s = snap(t(2026, 4, 26), positions_value=9280, cost_basis=8000)
         r = unrealized_return(s)
         self.assertIsNotNone(r)

@@ -1,11 +1,11 @@
 """Unit tests for brokers/tr/adapter.py.
 
-Estos tests construyen eventos raw mínimos (con la forma que TR emite) y
-verifican que `raw_event_to_tx` los mapea al `Transaction` correcto.
+These tests build minimal raw events (matching the shape TR emits) and
+verify that `raw_event_to_tx` maps them to the correct `Transaction`.
 
-Para los event types donde el adapter delega a `brokers/tr/parser.py`
-(TRADING_*, SAVEBACK, GIFTING, dividendos), monkeypatchamos el parser para
-aislar la lógica del adapter de la del parser.
+For event types where the adapter delegates to `brokers/tr/parser.py`
+(TRADING_*, SAVEBACK, GIFTING, dividends), we monkeypatch the parser to
+isolate the adapter's logic from the parser's.
 """
 import unittest
 from unittest.mock import patch

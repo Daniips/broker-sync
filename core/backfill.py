@@ -1,27 +1,22 @@
 """
-Reconstrucción de PortfolioSnapshots históricos a partir del estado actual,
-las transacciones, y precios históricos por ISIN.
-
 Historical reconstruction of PortfolioSnapshots from current state,
 transaction history, and per-ISIN historical prices.
 
-Lógica pura, sin I/O. La obtención de precios históricos vive en el adapter
-del broker (brokers/<x>/adapter.py).
-
-Pure logic, no I/O. Historical price fetching lives in the broker's adapter.
+Pure logic, no I/O. Historical price fetching lives in the broker's adapter
+(brokers/<x>/adapter.py).
 
 # Caveats
 
-- BUYs sin `shares` (típicamente saveback, donde el parser no extrae el
-  número de acciones) se tratan como Δ shares = 0. Implica que las shares
-  reconstruidas a fechas pasadas pueden estar ligeramente sobreestimadas
-  (asumimos que esas shares ya existían). Para saveback el error es típicamente
-  fracciones de %.
-- Si una posición fue vendida totalmente y ya no existe en `current_snapshot`,
-  no se reconstruye su histórico (no la conocemos). Para MWR esto introduce un
-  pequeño error si los SELLs de esa posición fueron significativos.
-- `cost_basis` no se reconstruye en histórico (None en cada Position) — para
-  reconstruirlo necesitaríamos tracking de averageBuyIn a lo largo del tiempo.
+- BUYs without `shares` (typically saveback, where the parser does not
+  extract the share count) are treated as Δ shares = 0. This means shares
+  reconstructed at past dates may be slightly overestimated (we assume those
+  shares already existed). For saveback the error is typically a fraction
+  of a percent.
+- If a position was fully sold and no longer exists in `current_snapshot`,
+  its history is not reconstructed (we don't know about it). This introduces
+  a small MWR error if its SELLs were significant.
+- `cost_basis` is not reconstructed historically (None on each Position) —
+  reconstructing it would require tracking averageBuyIn over time.
 """
 from __future__ import annotations
 
@@ -37,14 +32,15 @@ def shares_at(
     current_snapshot: PortfolioSnapshot,
     txs: list[Transaction],
 ) -> dict[str, float]:
-    """Para cada ISIN actualmente en cartera, calcula shares en `date`.
+    """For each ISIN currently held, compute shares as of `date`.
 
-    Retrocede desde `current_snapshot` aplicando la inversa de cada tx con ts > date:
-      - BUY  → restamos shares (teníamos menos antes del BUY)
-      - SELL → sumamos shares (teníamos más antes del SELL)
+    Walks back from `current_snapshot` applying the inverse of each tx with
+    ts > date:
+      - BUY  → subtract shares (we had fewer before the BUY)
+      - SELL → add shares (we had more before the SELL)
 
-    Devuelve {isin: shares} solo para ISINs con shares > 0 en `date` (los
-    ISINs que aún no se habían comprado en esa fecha se excluyen).
+    Returns {isin: shares} only for ISINs with shares > 0 at `date` (ISINs
+    not yet purchased at that date are excluded).
     """
     out: dict[str, float] = {}
     for p in current_snapshot.positions:
@@ -69,11 +65,11 @@ def cash_at(
     current_cash: float,
     txs: list[Transaction],
 ) -> float:
-    """Calcula el balance de cash en `date` retrocediendo desde `current_cash`.
+    """Compute the cash balance at `date` walking back from `current_cash`.
 
-    Solo cuenta tx con `from_cash=True` (saveback/regalos no movieron cash).
-    Por convención, `amount_eur` ya viene firmado (BUY < 0, DEPOSIT > 0...),
-    así que la inversa es `cash_anterior = cash_actual − amount_eur`.
+    Counts only txs with `from_cash=True` (saveback/gifts didn't move cash).
+    By convention, `amount_eur` is already signed (BUY < 0, DEPOSIT > 0...),
+    so the inverse is `previous_cash = current_cash − amount_eur`.
     """
     cash = current_cash
     for tx in txs:
@@ -91,13 +87,14 @@ def reconstruct_snapshot_at(
     txs: list[Transaction],
     prices_at_date: dict[str, float],
 ) -> PortfolioSnapshot:
-    """Reconstruye un PortfolioSnapshot en `date`.
+    """Reconstruct a PortfolioSnapshot at `date`.
 
-    `prices_at_date`: {isin: precio_close_eur} en `date`. ISINs sin precio se
-    excluyen (no aportan a positions_value); el caller debe loggear esos casos.
+    `prices_at_date`: {isin: close_price_eur} at `date`. ISINs without a
+    price are excluded (they don't add to positions_value); the caller
+    should log those cases.
 
-    Las Positions resultantes tienen `cost_basis_eur=None` y `title`/`broker`
-    heredados de la posición actual del mismo ISIN.
+    Resulting Positions have `cost_basis_eur=None` and `title`/`broker`
+    inherited from the current position with the same ISIN.
     """
     shares_per_isin = shares_at(date, current_snapshot, txs)
     cash = cash_at(date, current_snapshot.cash_eur, txs)

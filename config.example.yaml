@@ -1,74 +1,75 @@
 # tr-sync configuration
-# Copia este fichero a `config.yaml` y rellena los valores con los tuyos.
-# `config.yaml` está en .gitignore para que no subas tus datos al repo.
+# Copy this file to `config.yaml` and fill in the values with your own.
+# `config.yaml` is in .gitignore so you don't push your data to the repo.
 
-# ── Feature toggles (qué partes del sync se ejecutan) ─────────────────────
-# Pon `false` para deshabilitar una parte. Útil si no usas alguna pestaña.
+# ── Feature toggles (which parts of the sync run) ─────────────────────────
+# Set `false` to disable a part. Useful if you don't use a given tab.
 features:
-  expenses: true       # sincronizar pestaña Gastos
-  income: true         # sincronizar pestaña Ingresos
-  investments: true    # sincronizar pestaña Dinero invertido
-  portfolio: true      # snapshot del portfolio (`make portfolio`)
+  expenses: true       # sync the Expenses tab
+  income: true         # sync the Income tab
+  investments: true    # sync the Investments tab
+  portfolio: true      # portfolio snapshot (`make portfolio`)
 
-# ── Renta: secciones del informe a generar ────────────────────────────────
-# Cada toggle controla una sección de `make renta`. Las secciones cripto y
-# modelo720 requieren conectar a TR para snapshot del portfolio; si ambas
-# están en false, el script se ahorra esa llamada.
+# ── Renta: report sections to generate ────────────────────────────────────
+# Each toggle controls one section of `make renta`. The crypto and modelo720
+# sections require connecting to TR for the portfolio snapshot; if both are
+# false, the script avoids that call.
 renta:
-  fifo: true             # 1. Ganancias/pérdidas patrimoniales (FIFO)
-  dividends: true        # 2. Dividendos (casilla 0029)
-  interest: true         # 3. Intereses (casilla 0027)
-  bonds: true            # 4. Bonos / otros activos financieros (casilla 0031)
-  summary_by_box: true   # 5. Resumen por casilla (contraste con borrador)
-  retentions: true       # 6. Retenciones extranjeras por país
-  saveback: true         # 7. Saveback recibido
-  crypto: true           # 8. Posición cripto (Modelo 721)
-  modelo720: true        # 9. Saldo total TR (Modelo 720 orientativo)
+  fifo: true             # 1. Capital gains/losses (FIFO)
+  dividends: true        # 2. Dividends (casilla 0029)
+  interest: true         # 3. Interest (casilla 0027)
+  bonds: true            # 4. Bonds / other financial assets (casilla 0031)
+  summary_by_box: true   # 5. Summary by casilla (cross-check vs draft)
+  retentions: true       # 6. Foreign withholdings by country
+  saveback: true         # 7. Saveback received
+  crypto: true           # 8. Crypto position (Modelo 721)
+  modelo720: true        # 9. Total TR balance (informative Modelo 720)
 
 # ── Google Sheet ──────────────────────────────────────────────────────────
-# El ID del Sheet sale de la URL: docs.google.com/spreadsheets/d/<ESTE_ID>/edit
+# The Sheet ID comes from the URL: docs.google.com/spreadsheets/d/<THIS_ID>/edit
 sheet_id: "REEMPLAZA_CON_TU_GOOGLE_SHEET_ID"
 
-# ── Nombres de pestañas ───────────────────────────────────────────────────
+# ── Tab names ─────────────────────────────────────────────────────────────
 sheets:
   expenses: "Gastos"
   income: "Ingresos"
-  # Layout de las pestañas Gastos/Ingresos:
-  #   - "monthly_columns" (default): meses como pares de columnas Concepto+Importe.
-  #     Detecta el bloque resumen al final del mes e inserta filas justo encima.
-  #   - "ledger": una fila por evento con columnas Fecha/Concepto/Importe.
-  #     Append simple a la primera fila libre.
+  # Layout for the Expenses/Income tabs:
+  #   - "monthly_columns" (default): months as Concepto+Importe column pairs.
+  #     Detects the summary block at the bottom of the month and inserts
+  #     rows just above it.
+  #   - "ledger": one row per event with Date/Concept/Amount columns.
+  #     Simple append to the first empty row.
   expenses_layout: "monthly_columns"
   income_layout: "monthly_columns"
-  # Cabeceras del layout 'ledger' (3 strings).
+  # Headers for the 'ledger' layout (3 strings).
   ledger_headers: ["Fecha", "Concepto", "Importe"]
-  # Columnas A1 donde escribir cada campo en layout 'ledger'. Defaults A/B/C
-  # (contiguas). Pueden ser cualquier letra de columna y NO tienen que ser
-  # contiguas: por ejemplo si tienes una columna de notas en A, puedes usar
-  # B/C/D, o si quieres separar concepto y amount con notas en medio:
+  # A1 columns where each field is written in the 'ledger' layout. Defaults A/B/C
+  # (contiguous). Can be any column letter and they do NOT have to be
+  # contiguous: e.g. if you have a notes column at A, you can use B/C/D, or
+  # if you want to separate concept and amount with notes in between:
   #   ledger_columns: { date: "A", concept: "B", amount: "D" }
   ledger_columns:
     date: "A"
     concept: "B"
     amount: "C"
-  # Patrones para los headers de mes en layout 'monthly_columns'. Marcadores
-  # disponibles: {month} (de month_names) y {year}. Defaults siguen el formato
-  # español. Si tu pestaña usa otro idioma o convención, cámbialos:
+  # Patterns for the month headers in the 'monthly_columns' layout. Markers
+  # available: {month} (from month_names) and {year}. Defaults follow the
+  # Spanish format. If your tab uses another language or convention, change them:
   #   month_header_amount: "{month}/{year}"
   #   month_header_concept: "Concept {month}"
   month_header_amount: "{month} {year}"
   month_header_concept: "Concepto {month}"
-  # Patrón con {year}; el script lo formatea con el año fiscal en uso
+  # Pattern with {year}; the script formats it with the fiscal year in use
   investments_year_format: "Dinero invertido {year}"
-  # Año fiscal de la pestaña de inversiones; null = año actual
+  # Fiscal year for the investments tab; null = current year
   investments_year: null
   portfolio: "Calculo ganancias"
   status: "Estado sync"
   sync_state: "_sync_state"
 
-# ── Marcadores del bloque resumen al final de cada mes en Gastos/Ingresos ─
-# Strings (case-insensitive) que el script busca para saber dónde está el
-# resumen mensual y poder insertar nuevas filas por encima.
+# ── Markers for the summary block at the end of each month in Expenses/Income ─
+# Strings (case-insensitive) the script searches for to know where the
+# monthly summary is so it can insert new rows above it.
 summary_markers:
   expenses:
     - "gastos innecesarios"
@@ -79,14 +80,14 @@ summary_markers:
     - "ingresos"
     - "totales"
 
-# ── Etiquetas de la pestaña Estado sync ───────────────────────────────────
+# ── Labels for the Status sync tab ────────────────────────────────────────
 status_labels:
   portfolio: "Portfolio"
   sync: "Sync completo"
 
-# ── Mapeo de nombres de activos (TR → tu pestaña Inversiones) ─────────────
-# Cómo aparecen los assets en TR (clave) y cómo quieres que aparezcan
-# en la pestaña "Dinero invertido" (valor).
+# ── Asset name map (TR → your Investments tab) ────────────────────────────
+# How the assets appear in TR (key) and how you want them to appear in the
+# "Dinero invertido" tab (value).
 asset_name_map:
   "MSCI India USD (Acc)": "MSCI India"
   "Solana": "Solana"
@@ -95,9 +96,9 @@ asset_name_map:
   "Core S&P 500 USD (Acc)": "SP 500"
   "MSCI World Small Cap USD (Acc)": "SMALL CAPS"
 
-# ── Portfolio: pestaña "Calculo ganancias" ────────────────────────────────
-# Lista ordenada de ISINs con su etiqueta. El orden vertical debe coincidir
-# con las filas del rango portfolio_value_range (una entrada por celda).
+# ── Portfolio: "Calculo ganancias" tab ────────────────────────────────────
+# Ordered list of ISINs with their label. The vertical order must match
+# the rows of portfolio_value_range (one entry per cell).
 portfolio_cell_map:
   - { isin: "IE00B5BMR087", label: "sp500" }
   - { isin: "IE00B3WJKG14", label: "sp500 tech" }
@@ -107,42 +108,43 @@ portfolio_cell_map:
   - { isin: "IE00BZCQB185", label: "india" }
   - { isin: "XF000SOL0012", label: "solana" }
 
-# Rango de la pestaña portfolio donde se escriben los netValue (un valor por fila).
-# Debe tener tantas celdas como entradas en portfolio_cell_map.
+# Range in the portfolio tab where the netValues are written (one value per row).
+# Must have as many cells as entries in portfolio_cell_map.
 portfolio_value_range: "C2:C8"
 
-# ── Cripto ────────────────────────────────────────────────────────────────
-# ISINs que el script debe tratar como cripto (informativo Modelo 721).
+# ── Crypto ────────────────────────────────────────────────────────────────
+# ISINs the script should treat as crypto (informative Modelo 721).
 crypto_isins:
   - "XF000SOL0012"
 
-# ── Eventos a ignorar (no se sincronizan a Gastos/Ingresos) ───────────────
-# Útil cuando ya gestionas algo manualmente en la Sheet (p.ej. la nómina que
-# cobras en otra cuenta y luego mueves a TR — para no duplicarla).
-# Match case-insensitive, por substring tanto sobre `title` como `subtitle`.
+# ── Events to ignore (not synced to Expenses/Income) ──────────────────────
+# Useful when you already manage something manually in the Sheet (e.g. the
+# salary you receive in another account and then move to TR — to avoid
+# duplicating it). Match is case-insensitive, by substring against both
+# `title` and `subtitle`.
 ignore_events:
   income:
     title_contains: []
-      # - "imagin"            # ignora ingresos cuyo title contenga 'imagin'
-      # - "tu nombre apellido" # ignora autotransferencias desde otra cuenta
+      # - "imagin"            # ignore income whose title contains 'imagin'
+      # - "your name surname" # ignore self-transfers from another account
     subtitle_contains: []
   expenses:
     title_contains: []
     subtitle_contains: []
 
-# ── Override manual para regalos con datos no parseables ──────────────────
-# Si TR envía algún regalo (GIFTING_*) sin shares/coste extraíbles del JSON,
-# rellena aquí manualmente el dato del Jährlicher Steuerbericht de TR.
-# Formato: ISIN -> { shares: <float>, cost_eur: <float> }
+# ── Manual override for gifts with non-parseable data ─────────────────────
+# If TR sends a gift (GIFTING_*) without shares/cost extractable from the JSON,
+# fill in the data here manually from TR's Jährlicher Steuerbericht.
+# Format: ISIN -> { shares: <float>, cost_eur: <float> }
 gift_cost_overrides: {}
-  # Ejemplo:
+  # Example:
   # LU1681048804:
   #   shares: 0.222311
   #   cost_eur: 25.00
 
-# ── Nombres de meses ──────────────────────────────────────────────────────
-# Lista de 12 elementos. Tienen que coincidir con los que usas en los
-# headers de tus pestañas Gastos/Ingresos/Dinero invertido (case-insensitive).
+# ── Month names ───────────────────────────────────────────────────────────
+# List of 12 elements. They must match the ones used in the headers of your
+# Expenses/Income/Investments tabs (case-insensitive).
 month_names:
   - "enero"
   - "febrero"
@@ -157,39 +159,79 @@ month_names:
   - "noviembre"
   - "diciembre"
 
-# ── Label de Saveback en pestaña Inversiones ─────────────────────────────
-# La fila de Saveback en la pestaña "Dinero invertido" usa este label.
+# ── Saveback label in the Investments tab ────────────────────────────────
+# The Saveback row in the "Dinero invertido" tab uses this label.
 saveback_label: "SAVEBACK"
 
-# ── Cabeceras automáticas que escribe `make init-sheet` ──────────────────
-# Solo se usan al crear pestañas vacías la primera vez.
+# ── Automatic headers written by `make init-sheet` ───────────────────────
+# Only used when creating empty tabs for the first time.
 init_sheet_headers:
   investments_asset_column: "Activo"
   portfolio_asset_column: "Activo"
   portfolio_value_column: "Valor (€)"
 
-# ── Traducciones de subtitles de TR (alemán → idioma del usuario) ────────
-# La API de TR responde siempre en alemán; aquí se traducen para mostrarlos.
-# El default cubre los más habituales en castellano. Añade/sobrescribe si
-# quieres usar otro idioma o tienes algún subtitle nuevo.
+# ── Translations of TR subtitles (German → user language) ────────────────
+# The TR API always responds in German; here the subtitles are translated
+# for display. The default covers the most common ones in Spanish. Add or
+# override entries if you want another language or have a new subtitle.
 subtitle_translations: {}
-  # Ejemplos:
+  # Examples:
   # "Bardividende": "Cash dividend"
   # "Verkaufsorder": "Sell order"
   # "Endgültige Fälligkeit": "Final maturity"
 
-# ── Clasificación de subtitles para el informe IRPF ──────────────────────
-# Subtitles alemanes que TR usa en eventos SSP_CORPORATE_ACTION_CASH para
-# clasificar dividendos / cupones / amortizaciones. Si TR introduce un nuevo
-# subtitle, añádelo aquí sin tocar código.
+# ── Subtitle classification for the IRPF report ──────────────────────────
+# German subtitles TR uses in SSP_CORPORATE_ACTION_CASH events to classify
+# dividends / coupons / maturities. If TR introduces a new subtitle, add it
+# here without touching code.
 renta_classification:
   dividend_subtitles: ["Bardividende", "Aktienprämiendividende", "Kapitalertrag"]
   bond_cash_subtitles: ["Zinszahlung", "Kupon"]
   bond_maturity_subtitles: ["Endgültige Fälligkeit"]
 
+# ── Cash runway / Savings efficiency (optional overrides) ────────────────
+# By default `make insights` derives income and expenses from TR's own
+# transaction stream:
+#   - Income   = avg DEPOSITs over the last 6m (incoming transfers from
+#     your other account — effectively your salary, even if listed in
+#     `ignore_events` so they don't duplicate in the Sheet, they remain
+#     in the tx stream).
+#   - Expenses = avg TR expenses over the last 6m (card + outgoing bizum
+#     + outgoing transfers — only spending that flows through TR).
+# Only set these fields if you want to override the automatic computation
+# (e.g. your real spending is higher because you pay things from another
+# account):
+# monthly_income_eur: 3500
+# monthly_expenses_eur: 1800
+
+# ── Cash target ───────────────────────────────────────────────────────────
+# Target cash range you want to keep at TR (€). The "CASH TARGET" block of
+# `make insights` warns when you fall outside the range:
+#   - cash > max_eur → structural surplus (investable excess)
+#   - cash < min_eur → underfunded (low buffer)
+# Either may be omitted; if both are missing, the block is skipped.
+#
+# Each bound supports two forms:
+#   (a) scalar — a fixed € value over time:
+#       cash_targets:
+#         min_eur: 10000
+#         max_eur: 20000
+#
+#   (b) schedule — a {ISO_date: €} map that scales the target every so
+#       often. The entry with date <= today is selected. Useful if you
+#       want to raise the ceiling every 6 months without editing config
+#       by hand:
+#       cash_targets:
+#         min_eur: 10000
+#         max_eur:
+#           "2025-01-01": 15000
+#           "2026-07-01": 17500
+#           "2027-01-01": 20000
+#           "2027-07-01": 22500
+
 # ── Misc ──────────────────────────────────────────────────────────────────
-# Buffer de días antes del inicio del mes actual al descargar eventos
+# Buffer of days before the start of the current month when downloading events
 default_buffer_days: 7
 
-# Zona horaria
+# Time zone
 timezone: "Europe/Madrid"

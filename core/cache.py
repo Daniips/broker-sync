@@ -2,22 +2,20 @@
 Disk cache for `(PortfolioSnapshot, list[Transaction])` to avoid re-fetching
 TR data twice in a row.
 
-Cache en disco para `(PortfolioSnapshot, list[Transaction])` y evitar bajar
-de TR los mismos datos dos veces seguidas.
-
-Uso típico: hacer `make portfolio && make insights` ya no genera dos logins
-y dos descargas — la segunda ejecución reutiliza el cache si fue hace <TTL.
+Typical use: running `make portfolio && make insights` no longer triggers
+two logins and two downloads — the second run reuses the cache if it was
+created less than TTL ago.
 
 # Tradeoffs
 
-- Pickle: simple, soporta dataclasses + ZoneInfo + tuples. No portable entre
-  versiones de Python si cambian los pickles internos, pero como el cache se
-  refresca cada minutos no es problema.
-- TTL corto (5 min default): suficiente para encadenar comandos en la misma
-  sesión de terminal sin llegar al límite donde TR podría haber emitido nuevos
-  eventos. No usar como cache de larga duración.
-- Best-effort: si el cache está corrupto o falla cargar, devuelve None y se
-  refetch. Nunca rompe el flujo principal.
+- Pickle: simple, supports dataclasses + ZoneInfo + tuples. Not portable
+  across Python versions if the internal pickles change, but since the cache
+  is refreshed every few minutes it's not an issue.
+- Short TTL (5 min default): enough to chain commands in the same terminal
+  session without hitting the limit where TR may have emitted new events.
+  Do not use as a long-lived cache.
+- Best-effort: if the cache is corrupt or fails to load, returns None and
+  triggers a refetch. Never breaks the main flow.
 """
 from __future__ import annotations
 
@@ -31,7 +29,7 @@ from core.types import PortfolioSnapshot, Transaction
 
 
 DEFAULT_TTL = timedelta(minutes=5)
-_CACHE_VERSION = 2   # bump si cambia el shape de Transaction/Position/Snapshot/cache
+_CACHE_VERSION = 2   # bump if the shape of Transaction/Position/Snapshot/cache changes
 
 log = logging.getLogger("tr_sync")
 
@@ -41,14 +39,14 @@ def load_cached_session(
     *,
     ttl: timedelta = DEFAULT_TTL,
 ) -> Optional[tuple[PortfolioSnapshot, list[Transaction], dict[str, list[dict]]]]:
-    """Devuelve (snapshot, txs, benchmarks) si hay cache fresco, o None.
+    """Return (snapshot, txs, benchmarks) if there is a fresh cache, or None.
 
-    `benchmarks` es `{ISIN: price_history_list}` para los ISINs benchmark
-    cacheados con la sesión. Vacío `{}` si nunca se pidió ninguno.
+    `benchmarks` is `{ISIN: price_history_list}` for the benchmark ISINs
+    cached with the session. Empty `{}` if none was ever requested.
 
-    `ttl`: edad máxima del cache antes de considerarlo stale.
-    Cualquier error al cargar (fichero no existe, pickle corrupto, versión
-    obsoleta, etc.) → None silencioso. El caller hace fetch normal.
+    `ttl`: maximum cache age before considering it stale.
+    Any load error (file missing, corrupt pickle, obsolete version, etc.)
+    → silently None. The caller falls back to a normal fetch.
     """
     if not cache_path.exists():
         return None
@@ -56,12 +54,12 @@ def load_cached_session(
         with open(cache_path, "rb") as f:
             data = pickle.load(f)
     except Exception as e:
-        log.debug(f"cache: no se pudo cargar ({e}); refetch")
+        log.debug(f"cache: could not load ({e}); refetch")
         return None
     if not isinstance(data, dict):
         return None
     if data.get("version") != _CACHE_VERSION:
-        log.debug(f"cache: versión obsoleta ({data.get('version')} ≠ {_CACHE_VERSION}); refetch")
+        log.debug(f"cache: obsolete version ({data.get('version')} ≠ {_CACHE_VERSION}); refetch")
         return None
     cached_at = data.get("cached_at")
     if not isinstance(cached_at, datetime):
@@ -77,7 +75,7 @@ def load_cached_session(
         return None
     if not isinstance(benchmarks, dict):
         benchmarks = {}
-    log.info(f"   ⚡ usando cache TR (edad: {age.total_seconds():.0f}s, TTL: {ttl.total_seconds():.0f}s)")
+    log.info(f"   ⚡ using TR cache (age: {age.total_seconds():.0f}s, TTL: {ttl.total_seconds():.0f}s)")
     return snapshot, txs, benchmarks
 
 
@@ -88,7 +86,7 @@ def save_cached_session(
     *,
     benchmarks: Optional[dict[str, list[dict]]] = None,
 ) -> None:
-    """Guarda (snapshot, txs, benchmarks) al disco. Best-effort: si falla, no rompe."""
+    """Save (snapshot, txs, benchmarks) to disk. Best-effort: never breaks."""
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with open(cache_path, "wb") as f:
@@ -100,11 +98,11 @@ def save_cached_session(
                 "benchmarks": benchmarks or {},
             }, f)
     except Exception as e:
-        log.debug(f"cache: no se pudo guardar ({e})")
+        log.debug(f"cache: could not save ({e})")
 
 
 def invalidate_cache(cache_path: Path) -> None:
-    """Borra el cache (para `--refresh` o tras cambios destructivos)."""
+    """Delete the cache (for `--refresh` or after destructive changes)."""
     try:
         cache_path.unlink(missing_ok=True)
     except Exception:

@@ -1,14 +1,10 @@
 """
 Broker-agnostic financial metrics.
-Métricas financieras agnósticas de broker.
 
 Pure functions over core.types.Transaction[] and core.types.PortfolioSnapshot.
 No I/O, no broker imports, no Sheet writes.
 
-Funciones puras sobre core.types.Transaction[] y core.types.PortfolioSnapshot.
-Sin I/O, sin imports de broker, sin escritura a Sheet.
-
-# Conceptual model / Modelo conceptual
+# Conceptual model
 
 The "portfolio" is defined as the set of invested positions (not the cash
 account). Therefore:
@@ -61,12 +57,12 @@ def _in_window(ts: datetime, start: Optional[datetime], end: Optional[datetime])
 
 
 def total_wealth(snapshot: PortfolioSnapshot) -> float:
-    """Cash + valor de posiciones."""
+    """Cash + position value."""
     return snapshot.total_eur
 
 
 def positions_value(snapshot: PortfolioSnapshot) -> float:
-    """Solo el valor de las posiciones (excluye cash)."""
+    """Just the value of the positions (excludes cash)."""
     return snapshot.positions_value_eur
 
 
@@ -75,22 +71,23 @@ def cost_basis_of_current_holdings(
     *,
     bonus_at_zero_cost: bool = True,
 ) -> dict[str, float]:
-    """Cost basis por ISIN de las shares ACTUALMENTE en cartera, vía FIFO.
+    """Cost basis per ISIN for the shares CURRENTLY held, via FIFO.
 
-    Empareja SELLs contra los BUYs más antiguos del mismo ISIN; lo que queda
-    sin emparejar son las shares vivas y su coste agregado es el cost basis
-    "real" de lo que aún tienes.
+    Matches SELLs against the oldest BUYs of the same ISIN; what remains
+    unmatched are the live shares and their aggregate cost is the "real"
+    cost basis of what you still own.
 
-    Diferencia clave vs `Position.cost_basis_eur` (que viene de
-    `averageBuyIn × netSize` del broker):
-      - `bonus_at_zero_cost=True` (default): saveback y regalos contribuyen
-        0€ al cost basis. Equivale a "dinero que TÚ pusiste de tu bolsillo
-        en estas shares" — matchea el "Invertido" de un Excel manual.
-      - `bonus_at_zero_cost=False`: cuenta saveback/regalos a su precio de
-        mercado en el momento de entrega — equivale a la fórmula del broker.
+    Key difference vs `Position.cost_basis_eur` (which comes from the
+    broker's `averageBuyIn × netSize`):
+      - `bonus_at_zero_cost=True` (default): saveback and gifts contribute
+        €0 to the cost basis. Equivalent to "money YOU put in for these
+        shares from your own pocket" — matches the "Invertido" of a manual
+        Excel.
+      - `bonus_at_zero_cost=False`: counts saveback/gifts at their market
+        price at delivery time — equivalent to the broker's formula.
 
-    Devuelve {isin: cost_basis_eur} solo de ISINs con cost basis > 0.
-    Ignora BUYs/SELLs sin shares conocidos (no se pueden emparejar por FIFO).
+    Returns {isin: cost_basis_eur} only for ISINs with cost basis > 0.
+    Ignores BUYs/SELLs without known shares (can't be FIFO-matched).
     """
     buys_by_isin: dict[str, list[dict]] = defaultdict(list)
     sells_by_isin: dict[str, list[dict]] = defaultdict(list)
@@ -130,16 +127,16 @@ def saveback_per_held_isin(
     snapshot: PortfolioSnapshot,
     txs: list[Transaction],
 ) -> dict[str, float]:
-    """Saveback acumulado por ISIN, restringido a posiciones aún en cartera.
+    """Saveback accumulated per ISIN, restricted to positions still held.
 
-    Solo cuenta `is_bonus=True` (saveback genuino — perks tipo regalo de TR
-    no entran porque tienen cost basis real, ver adapter).
+    Counts only `is_bonus=True` (genuine saveback — TR gift-style perks
+    don't qualify because they have a real cost basis, see adapter).
 
-    Aproximación: si has vendido parcialmente un ISIN con saveback, el número
-    sale "conservador" (resta la totalidad del saveback aunque parte se haya
-    vendido). En la práctica el usuario no suele vender saveback parcial, así
-    que el sesgo es despreciable; cuando guardemos snapshots históricos
-    podemos refinar con FIFO de saveback shares específicamente.
+    Approximation: if you partially sold an ISIN with saveback, the number
+    is "conservative" (it subtracts the full saveback even though part was
+    sold). In practice users rarely sell saveback partially, so the bias is
+    negligible; once historical snapshots are stored we can refine with
+    saveback-share-specific FIFO.
     """
     held_isins = {p.isin for p in snapshot.positions if p.isin}
     out: dict[str, float] = defaultdict(float)
@@ -154,17 +151,18 @@ def cost_basis_user_paid_per_isin(
     snapshot: PortfolioSnapshot,
     txs: list[Transaction],
 ) -> dict[str, float]:
-    """Cost basis "dinero propio" por ISIN: averageBuyIn×shares del broker
-    menos el saveback recibido para ese ISIN.
+    """"Own money" cost basis per ISIN: broker's averageBuyIn×shares minus
+    the saveback received for that ISIN.
 
-    Matchea el cálculo típico de un Excel manual:
-        Invertido = TR_cost_basis − saveback_recibido
+    Matches the typical manual-Excel calculation:
+        Invested = TR_cost_basis − saveback_received
 
-    Razón: TR cuenta saveback shares a precio de mercado en su averageBuyIn,
-    inflando el cost basis con dinero que TR te dio gratis. Al restar el
-    saveback acumulado, te queda lo que realmente saliste de tu cuenta cash.
+    Reason: TR counts saveback shares at their market price in
+    averageBuyIn, inflating the cost basis with money TR gave you for free.
+    Subtracting accumulated saveback leaves what actually left your cash
+    account.
 
-    Posiciones sin `cost_basis_eur` (broker no lo devolvió) se omiten.
+    Positions without `cost_basis_eur` (broker didn't return it) are skipped.
     """
     saveback = saveback_per_held_isin(snapshot, txs)
     out: dict[str, float] = {}
@@ -181,11 +179,11 @@ def unrealized_return_user_paid(
     snapshot: PortfolioSnapshot,
     txs: list[Transaction],
 ) -> Optional[dict]:
-    """Plusvalía latente sobre el dinero propio (saveback descontado).
+    """Unrealized P&L on your own money (saveback netted out).
 
-    Usa `cost_basis_user_paid_per_isin`. Matchea el % "Ganancia" típico de
-    un Excel manual donde el saveback es "dinero gratis del broker" que no
-    infla el cost basis.
+    Uses `cost_basis_user_paid_per_isin`. Matches the typical "Gain" %
+    of a manual Excel where saveback is "free broker money" that doesn't
+    inflate the cost basis.
     """
     cb_per_isin = cost_basis_user_paid_per_isin(snapshot, txs)
     if not cb_per_isin:
@@ -211,21 +209,21 @@ def per_position_attribution(
     *,
     bonus_as: BonusAs = "income",
 ) -> list[dict]:
-    """MWR per posición + contribución ponderada al rendimiento de la cartera.
+    """Per-position MWR + weighted contribution to the portfolio's return.
 
-    Para cada posición actualmente en cartera:
-      - Filtra los flujos del ISIN: BUYs (negativos), SELLs / DIVIDENDs (positivos).
-      - Añade el valor actual como flujo final positivo.
-      - Calcula XIRR sobre esa serie → `position_mwr`.
+    For each currently held position:
+      - Filter the ISIN's flows: BUYs (negative), SELLs / DIVIDENDs (positive).
+      - Add the current value as a final positive flow.
+      - Compute XIRR over that series → `position_mwr`.
 
-    `contribution_pp` = `position_mwr × value_pct × 100` (puntos porcentuales
-    sobre la cartera). La suma de contribuciones aproxima el MWR de las
-    posiciones vivas (NO el MWR all-time del portfolio, que incluye también
-    flujos de posiciones ya vendidas).
+    `contribution_pp` = `position_mwr × value_pct × 100` (percentage points
+    over the portfolio). The sum of contributions approximates the MWR of
+    the live positions (NOT the portfolio's all-time MWR, which also
+    includes flows from already-sold positions).
 
-    Devuelve `[{isin, title, value, value_pct, position_mwr, contribution_pp}, ...]`
-    ordenado por abs(contribution_pp) descendente. Posiciones cuyo XIRR no
-    converge (típico: holding muy corto, pocos flujos) se omiten.
+    Returns `[{isin, title, value, value_pct, position_mwr, contribution_pp}, ...]`
+    sorted by abs(contribution_pp) descending. Positions whose XIRR doesn't
+    converge (typical: very short holding, too few flows) are skipped.
     """
     total_value = snapshot.positions_value_eur
     if total_value <= 0:
@@ -276,34 +274,34 @@ def benchmark_return(
     start_ts: datetime,
     end_ts: Optional[datetime] = None,
 ) -> Optional[dict]:
-    """Rentabilidad anualizada de un benchmark entre dos fechas.
+    """Annualized benchmark return between two dates.
 
-    `price_history`: lista de bars `{ts: datetime, close: float}` ordenada
-    ascendentemente por ts (lo que devuelve `fetch_price_history`).
-    `start_ts`: fecha inicial (usa el bar más cercano y anterior).
-    `end_ts`: fecha final (default = último bar disponible).
+    `price_history`: list of bars `{ts: datetime, close: float}` sorted
+    ascending by ts (what `fetch_price_history` returns).
+    `start_ts`: start date (uses the closest bar at or before).
+    `end_ts`: end date (default = last available bar).
 
-    Devuelve `{start_price, end_price, start_ts, end_ts, total_return,
-    annualized_return, days}` o None si no hay datos suficientes.
+    Returns `{start_price, end_price, start_ts, end_ts, total_return,
+    annualized_return, days}` or None if there's not enough data.
 
-    `total_return = end_price/start_price − 1` (acumulado).
-    `annualized_return = (1+total)^(365.25/days) − 1` (anualizado, comparable
-    contra MWR anualizado).
+    `total_return = end_price/start_price − 1` (cumulative).
+    `annualized_return = (1+total)^(365.25/days) − 1` (annualized, comparable
+    against an annualized MWR).
 
-    Asume que el benchmark es un ETF Acc (acumula dividendos en el precio). Si
-    fuera Dist, los dividendos cobrados quedarían fuera y la cifra sería
-    conservadora.
+    Assumes the benchmark is an Acc ETF (accumulates dividends in the price).
+    If it were Dist, distributed dividends would be missing and the figure
+    would be conservative.
     """
     if not price_history:
         return None
 
-    # Bar de inicio: el más reciente con ts ≤ start_ts. Si no hay ninguno
-    # anterior, usamos el primero (caso "start_ts es anterior al inicio del
-    # histórico" — devolvemos el rendimiento desde que existe data).
+    # Start bar: the most recent with ts ≤ start_ts. If there's none earlier,
+    # use the first one (case "start_ts is before the beginning of the
+    # history" — we return the return from the moment data exists).
     start_candidates = [b for b in price_history if b["ts"] <= start_ts]
     start_bar = start_candidates[-1] if start_candidates else price_history[0]
 
-    # Bar de fin
+    # End bar
     if end_ts is None:
         end_bar = price_history[-1]
     else:
@@ -343,16 +341,16 @@ def currency_exposure(
     include_cash: bool = True,
     unknown_label: str = "UNKNOWN",
 ) -> list[dict]:
-    """Distribución del patrimonio por divisa de denominación.
+    """Wealth distribution by denomination currency.
 
-    `currency_map`: ISIN → divisa (`"USD"`, `"EUR"`, etc.). ISINs sin entrada
-    se agrupan bajo `unknown_label`.
-    `cash_currency`: divisa del cash account. Default EUR.
-    `include_cash`: si True (default), añade cash al bucket de `cash_currency`.
+    `currency_map`: ISIN → currency (`"USD"`, `"EUR"`, etc.). ISINs without
+    an entry are grouped under `unknown_label`.
+    `cash_currency`: currency of the cash account. Default EUR.
+    `include_cash`: if True (default), adds cash to the `cash_currency` bucket.
 
-    Devuelve `[{currency, value_eur, pct, n_positions}, ...]` ordenado desc por
-    value_eur. `pct` es sobre `total_eur` cuando se incluye cash, sobre
-    `positions_value_eur` cuando no.
+    Returns `[{currency, value_eur, pct, n_positions}, ...]` sorted desc by
+    value_eur. `pct` is over `total_eur` when cash is included, over
+    `positions_value_eur` when not.
     """
     by_currency: dict[str, float] = defaultdict(float)
     n_positions: dict[str, int] = defaultdict(int)
@@ -365,7 +363,7 @@ def currency_exposure(
 
     if include_cash and snapshot.cash_eur > 0:
         by_currency[cash_currency] += snapshot.cash_eur
-        # No bumpeamos n_positions: cash no es una posición.
+        # Don't bump n_positions: cash is not a position.
 
     denom = snapshot.total_eur if include_cash else snapshot.positions_value_eur
     if denom <= 0:
@@ -391,27 +389,27 @@ def concentration(
     limits: Optional[dict[str, float]] = None,
     default_threshold: Optional[float] = None,
 ) -> list[dict]:
-    """Distribución de valor entre posiciones, ordenada de más a menos peso.
+    """Value distribution across positions, sorted by weight descending.
 
-    `scope="positions"`: % sobre el valor de las posiciones (excluye cash).
-    `scope="total"`: % sobre el patrimonio total (cash + posiciones).
+    `scope="positions"`: % over position value (excludes cash).
+    `scope="total"`: % over total wealth (cash + positions).
 
-    `limits`: dict ISIN → límite (0-1) por posición. Una entrada permite definir
-        un máximo razonable distinto para cada activo (p.ej. SP500 50%, cripto
-        8%). ISINs sin entrada caen al `default_threshold`.
-    `default_threshold`: límite a aplicar a ISINs no presentes en `limits`.
-        Si es None, las posiciones sin límite explícito devuelven `limit=None`
-        y `exceeded=False` (no se aplica ninguna alerta).
+    `limits`: dict ISIN → limit (0-1) per position. One entry lets you
+        define a sensible maximum that varies per asset (e.g. SP500 50%,
+        crypto 8%). ISINs without an entry fall back to `default_threshold`.
+    `default_threshold`: limit to apply to ISINs not present in `limits`.
+        If None, positions without an explicit limit return `limit=None`
+        and `exceeded=False` (no alert is raised).
 
-    Devuelve `[{isin, title, value, pct, limit, margin_pp, exceeded}, ...]`
-    sorted desc por pct, donde:
-      - `limit`: límite efectivo (0-1) o None si no hay ninguno aplicable.
-      - `margin_pp`: (limit - pct) × 100 en puntos porcentuales. Positivo = bajo
-        el límite. Negativo = excedido. None si no hay límite.
-      - `exceeded`: True si pct > limit (>= con tolerancia 1e-9 para evitar
-        falsos positivos por aritmética flotante).
+    Returns `[{isin, title, value, pct, limit, margin_pp, exceeded}, ...]`
+    sorted desc by pct, where:
+      - `limit`: effective limit (0-1) or None if none applicable.
+      - `margin_pp`: (limit - pct) × 100 in percentage points. Positive =
+        below the limit. Negative = exceeded. None if no limit.
+      - `exceeded`: True if pct > limit (with 1e-9 tolerance to avoid
+        floating-point false positives).
 
-    Lista vacía si no hay posiciones (o denominador es 0).
+    Empty list if there are no positions (or denominator is 0).
     """
     if scope == "total":
         denom = snapshot.total_eur
@@ -446,11 +444,11 @@ def concentration(
 
 
 def cost_basis_total(snapshot: PortfolioSnapshot) -> Optional[float]:
-    """Coste total de adquisición de las posiciones actuales (precio medio × shares).
+    """Total acquisition cost of current positions (avg price × shares).
 
-    Devuelve None si ninguna posición tiene cost_basis_eur disponible.
-    Solo suma posiciones con cost_basis_eur conocido — si el broker no lo da
-    para alguna posición, esa se excluye del total (se avisa por el caller).
+    Returns None if no position has cost_basis_eur available.
+    Only sums positions with known cost_basis_eur — if the broker doesn't
+    return it for some position, that one is excluded (the caller warns).
     """
     total = 0.0
     found = False
@@ -466,21 +464,21 @@ def unrealized_return(
     snapshot: PortfolioSnapshot,
     txs: Optional[list[Transaction]] = None,
 ) -> Optional[dict]:
-    """Plusvalía latente sobre las posiciones ACTUALES.
+    """Unrealized P&L over CURRENT positions.
 
-    Devuelve dos lecturas:
-      - pnl_pct (sin dividendos): (positions_value - cost_basis) / cost_basis.
-        Plusvalía pura por revalorización.
-      - pnl_pct_total (con dividendos): suma los dividendos cobrados de los
-        ISINs que tienes vivos. Matchea normalmente el % "Rendimiento" de la
-        app de TR. Solo se calcula si pasas `txs`.
+    Returns two readings:
+      - pnl_pct (no dividends): (positions_value - cost_basis) / cost_basis.
+        Pure price-appreciation P&L.
+      - pnl_pct_total (with dividends): adds the dividends received from
+        ISINs you still hold. Typically matches the TR app's "Performance"
+        %. Only computed if `txs` is passed.
 
-    Útil para "¿cómo van mis posiciones vivas?". No incluye intereses, cash,
-    ventas pasadas ni saveback/regalos como concepto separado (saveback que
-    sigue como acciones cuenta dentro del cost basis y value como cualquier
-    otra compra).
+    Useful for "how are my live positions doing?". Does not include
+    interest, cash, past sales, or saveback/gifts as a separate concept
+    (saveback that's still held as shares is counted within cost basis
+    and value like any other BUY).
 
-    Devuelve None si no hay cost_basis disponible.
+    Returns None if no cost_basis is available.
     """
     cost_basis = cost_basis_total(snapshot)
     if cost_basis is None or cost_basis <= 0:
@@ -527,9 +525,9 @@ def total_invested(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> float:
-    """Aportación neta a posiciones en el periodo: BUYs − SELLs.
+    """Net contribution to positions over the period: BUYs − SELLs.
 
-    Con `bonus_as='income'` (default) los BUYs con `is_bonus=True` no cuentan.
+    With `bonus_as='income'` (default) BUYs with `is_bonus=True` don't count.
     """
     total = 0.0
     for tx in txs:
@@ -550,9 +548,9 @@ def simple_return(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> Optional[float]:
-    """% simple = (positions_value - total_invested) / total_invested.
+    """Simple % = (positions_value - total_invested) / total_invested.
 
-    No anualizado. Devuelve None si no hay aportaciones netas positivas.
+    Not annualized. Returns None if there are no positive net contributions.
     """
     invested = total_invested(txs, bonus_as=bonus_as, start=start, end=end)
     if invested <= 0:
@@ -629,23 +627,23 @@ def mwr(
     start_value: Optional[float] = None,
     end: Optional[datetime] = None,
 ) -> Optional[float]:
-    """Money-weighted return (XIRR) anualizado.
+    """Annualized money-weighted return (XIRR).
 
-    Flujos considerados (todos durante (start, end] si se acota):
-      - BUY               → outflow (negativo) — sale dinero del bolsillo al portfolio
-      - SELL              → inflow  (positivo) — entra dinero del portfolio al bolsillo
-      - DIVIDEND          → inflow  (positivo) — cobro recibido del portfolio
-      - Snapshot final    → inflow positivo (positions_value_eur) en `end`/`snapshot.ts`
+    Flows considered (all during (start, end] if bounded):
+      - BUY               → outflow (negative) — money leaves the pocket into the portfolio
+      - SELL              → inflow  (positive) — money returns to the pocket from the portfolio
+      - DIVIDEND          → inflow  (positive) — payout received from the portfolio
+      - Final snapshot    → positive inflow (positions_value_eur) at `end`/`snapshot.ts`
 
-    INTEREST queda fuera (es rendimiento del cash, no del portfolio invertido).
+    INTEREST is excluded (it's cash-account yield, not invested-portfolio yield).
 
-    Para sub-periodos (start ≠ None):
-      - Necesitas pasar `start_value` (valor de las posiciones al inicio del
-        periodo), que se modela como "deposit sintético" en `start`.
-      - Sin `start_value`, devuelve None (el cálculo daría números absurdos
-        al ignorar el valor inicial — no mentimos).
+    For sub-periods (start ≠ None):
+      - You must pass `start_value` (position value at the start of the
+        period), which is modeled as a "synthetic deposit" at `start`.
+      - Without `start_value`, returns None (the computation would yield
+        absurd numbers by ignoring the initial value — we don't lie).
 
-    Para all-time (start=None) el cálculo es exacto sin parámetros extra.
+    For all-time (start=None) the computation is exact with no extra args.
     """
     if start is not None and start_value is None:
         # Honest-fail: sub-period MWR requires the portfolio value at `start`.
@@ -679,20 +677,22 @@ def monthly_contributions(
     include_bonus: bool = True,
     include_sells: bool = False,
 ) -> dict[tuple[int, int], float]:
-    """{(year, month): suma de compras del mes}.
+    """{(year, month): sum of BUYs for the month}.
 
-    Defaults pensados para matchear el cálculo intuitivo de "cuánto invertí
-    este mes" (igual que la pestaña "Dinero invertido" del Sheet):
+    Defaults are designed to match the intuitive "how much did I invest
+    this month" calculation (same as the "Dinero invertido" tab in the
+    Sheet):
 
-      - include_bonus=True: saveback y regalos cuentan como aportación.
-        El bróker te lo dio, pero acabó como acciones en tu cartera.
-      - include_sells=False: solo BUYs, no resta SELLs. Una venta es una
-        operación aparte; no "des-invierte" el concepto de aportación
-        mensual (si vendiste 50€ de oro, sigues habiendo invertido lo que
-        invertiste).
+      - include_bonus=True: saveback and gifts count as a contribution.
+        The broker gave them to you, but they ended up as shares in your
+        portfolio.
+      - include_sells=False: only BUYs, doesn't subtract SELLs. A sale is
+        a separate operation; it doesn't "un-invest" the concept of a
+        monthly contribution (if you sold €50 of gold, you still invested
+        what you invested).
 
-    Cambia los flags si quieres "aportación neta del periodo" (con sells)
-    o "solo dinero propio" (sin saveback/regalos).
+    Flip the flags if you want "net period contribution" (with sells) or
+    "only own money" (without saveback/gifts).
     """
     out: dict[tuple[int, int], float] = defaultdict(float)
     for tx in txs:
@@ -715,14 +715,14 @@ def contribution_vs_average(
     include_sells: bool = False,
     window_months: int = 12,
 ) -> Optional[dict]:
-    """Compara la aportación de (ref_year, ref_month) vs media de los
-    `window_months` meses anteriores (no incluye el mes de referencia).
+    """Compare (ref_year, ref_month) contribution vs the average of the
+    previous `window_months` months (does not include the reference month).
 
-    Solo entran en la media los meses con aportación > 0 (para no diluir
-    con meses en los que no aportaste nada).
+    Only months with contribution > 0 enter the average (to avoid diluting
+    with months where you didn't contribute).
 
-    Devuelve {this_month, avg, delta_pct, window_months_used} o None si no
-    hay meses anteriores con aportaciones.
+    Returns {this_month, avg, delta_pct, window_months_used} or None if
+    there are no prior months with contributions.
     """
     monthly = monthly_contributions(txs, include_bonus=include_bonus, include_sells=include_sells)
     this_month = monthly.get((ref_year, ref_month), 0.0)
@@ -773,6 +773,94 @@ def monthly_deposits(
         elif tx.kind == TxKind.WITHDRAWAL and net_of_withdrawals:
             out[key] -= abs(tx.amount_eur)
     return dict(out)
+
+
+def monthly_withdrawals(txs: list[Transaction]) -> dict[tuple[int, int], float]:
+    """{(year, month): cash outflows from the broker account}.
+
+    Sums WITHDRAWAL transactions only (CARD_TRANSACTION, outgoing bizum,
+    outgoing bank transfer). Useful as a proxy for monthly spending visible
+    to the broker. Caveat: only captures spending that flows through the
+    broker's cash account; expenses paid from another bank account are
+    invisible here.
+    """
+    out: dict[tuple[int, int], float] = defaultdict(float)
+    for tx in txs:
+        if tx.kind == TxKind.WITHDRAWAL:
+            out[(tx.ts.year, tx.ts.month)] += abs(tx.amount_eur)
+    return dict(out)
+
+
+def savings_efficiency(invested: float, income: float) -> Optional[dict]:
+    """Share of declared income that actually ends up invested.
+
+    ratio = invested / income
+
+    Both arguments are euro flows over the same period (caller decides the
+    window — typical use is monthly averages over the last 6 months).
+    Returns None if income <= 0.
+
+    Different denominator from `savings_ratio`, which compares invested
+    against deposits *to the broker*. This one compares against total
+    declared income (including money that never reaches the broker),
+    which catches under-investing when cash accumulates outside it.
+    """
+    if income <= 0:
+        return None
+    return {
+        "invested": invested,
+        "income": income,
+        "ratio": invested / income,
+    }
+
+
+def cash_excess(
+    cash_eur: float,
+    *,
+    min_eur: Optional[float] = None,
+    max_eur: Optional[float] = None,
+) -> dict:
+    """Compare current cash against a self-defined target range.
+
+    status:
+      - "over":     cash > max_eur — surplus = cash - max_eur (>0)
+      - "under":    cash < min_eur — deficit = cash - min_eur (<0)
+      - "in_range": min_eur <= cash <= max_eur (or only one bound set
+                    and not breached)
+      - "unknown":  no bounds configured
+
+    `gap_eur` is the signed distance to the breached bound (positive when
+    over the max, negative when under the min, 0 when in range, None when
+    unknown).
+    """
+    has_min = min_eur is not None
+    has_max = max_eur is not None
+    if not has_min and not has_max:
+        return {"status": "unknown", "gap_eur": None, "min_eur": None, "max_eur": None}
+    if has_max and cash_eur > max_eur:
+        return {"status": "over", "gap_eur": cash_eur - max_eur, "min_eur": min_eur, "max_eur": max_eur}
+    if has_min and cash_eur < min_eur:
+        return {"status": "under", "gap_eur": cash_eur - min_eur, "min_eur": min_eur, "max_eur": max_eur}
+    return {"status": "in_range", "gap_eur": 0.0, "min_eur": min_eur, "max_eur": max_eur}
+
+
+def cash_runway(cash_eur: float, monthly_expense: float) -> Optional[dict]:
+    """Months of expenses covered by cash alone, without touching invested
+    positions.
+
+    runway = cash / monthly_expense
+
+    Returns None if monthly_expense <= 0 (undefined runway). Caller is
+    responsible for sourcing a sensible monthly_expense (config override,
+    average of broker WITHDRAWAL txs, sheet-derived total, etc.).
+    """
+    if monthly_expense <= 0:
+        return None
+    return {
+        "cash": cash_eur,
+        "monthly_expense": monthly_expense,
+        "months": cash_eur / monthly_expense,
+    }
 
 
 def savings_projection(

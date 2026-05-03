@@ -36,46 +36,46 @@ def sync(dry_run: bool, since: datetime | None, init_mode: bool):
 
     With `dry_run=True` events are fetched but nothing is written.
     """
-    log.info("Conectando a Trade Republic...")
+    log.info("Connecting to Trade Republic...")
     tr = login()
     if init_mode:
         not_before = 0.0
-        log.info("  modo init: descargando todo el historial")
+        log.info("  init mode: downloading full history")
     elif since:
         not_before = since.timestamp()
-        log.info(f"  ventana: desde {since.date()}")
+        log.info(f"  window: since {since.date()}")
     else:
         now = datetime.now(tz=TIMEZONE)
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         cutoff = start_of_month - timedelta(days=DEFAULT_BUFFER_DAYS)
         not_before = cutoff.timestamp()
-        log.info(f"  ventana: desde {cutoff.date()} (inicio mes actual - {DEFAULT_BUFFER_DAYS} días)")
+        log.info(f"  window: since {cutoff.date()} (start of current month - {DEFAULT_BUFFER_DAYS} days)")
     raw_events = asyncio.run(fetch_tr_events(tr, not_before))
-    log.info(f"  {len(raw_events)} eventos descargados")
+    log.info(f"  {len(raw_events)} events downloaded")
 
     flows = filter_events_by_flow(raw_events)
     # Apply feature toggles: empty the disabled tab's list so nothing gets written.
     if not FEATURES.get("expenses", True):
         flows[EXPENSES_SHEET] = []
-        log.info("  features.expenses=false → gastos no se sincronizan")
+        log.info("  features.expenses=false → expenses are not synced")
     if not FEATURES.get("income", True):
         flows[INCOME_SHEET] = []
-        log.info("  features.income=false → ingresos no se sincronizan")
+        log.info("  features.income=false → income is not synced")
     if since:
         for k in flows:
             flows[k] = [e for e in flows[k] if e["ts"] >= since]
     flow_total = sum(len(v) for v in flows.values())
-    log.info(f"  {flow_total} en gastos/ingresos")
+    log.info(f"  {flow_total} in expenses/income")
 
-    log.info("Abriendo Google Sheet...")
+    log.info("Opening Google Sheet...")
     spreadsheet = open_spreadsheet()
 
     if init_mode:
         all_ids = [e["id"] for v in flows.values() for e in v]
         append_synced_ids(spreadsheet, all_ids)
-        log.info(f"\n[INIT] {len(all_ids)} gastos/ingresos marcados como sincronizados.")
-        log.info("Inversiones intactas (los valores que ya tienes se respetan).")
-        log.info("Próximas ejecuciones: gastos/ingresos nuevos + inversiones del mes actual recalculadas.")
+        log.info(f"\n[INIT] {len(all_ids)} expense/income items marked as synced.")
+        log.info("Investments untouched (existing values are preserved).")
+        log.info("Future runs: new expenses/income + recomputed investments for the current month.")
         return
 
     synced_ids = load_synced_ids(spreadsheet)
@@ -84,7 +84,7 @@ def sync(dry_run: bool, since: datetime | None, init_mode: bool):
         for name, events in flows.items()
     }
     new_total = sum(len(v) for v in new_flows.values())
-    log.info(f"  {new_total} nuevos en gastos/ingresos (resto ya sincronizados)")
+    log.info(f"  {new_total} new in expenses/income (rest already synced)")
 
     written_ids = []
     for sheet_name, sheet_txs in new_flows.items():
@@ -97,8 +97,8 @@ def sync(dry_run: bool, since: datetime | None, init_mode: bool):
     if FEATURES.get("investments", True):
         sync_investments(spreadsheet, raw_events, dry_run)
     else:
-        log.info("\n  features.investments=false → inversiones no se sincronizan")
+        log.info("\n  features.investments=false → investments are not synced")
 
     if not dry_run:
         write_status(spreadsheet, "sync")
-        log.info(f"\nOK: {len(written_ids)} mov. en gastos/ingresos + inversiones recalculadas.")
+        log.info(f"\nOK: {len(written_ids)} expense/income items + investments recomputed.")

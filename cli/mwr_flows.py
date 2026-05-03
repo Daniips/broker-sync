@@ -44,7 +44,7 @@ def dump_mwr_flows(
         elif tx.kind == TxKind.DIVIDEND:
             flows.append((tx.ts, abs(tx.amount_eur), "DIVIDEND", tx.title))
     flows.sort(key=lambda x: x[0])
-    flows.append((snapshot.ts, snapshot.positions_value_eur, "FINAL", "Posiciones actuales"))
+    flows.append((snapshot.ts, snapshot.positions_value_eur, "FINAL", "Current positions"))
 
     def fmt_amount(x: float) -> str:
         s = f"{x:.2f}"
@@ -55,10 +55,10 @@ def dump_mwr_flows(
 
     print(f"# MWR cash flows (bonus_as={bonus_as}, locale={locale})")
     if locale == "es":
-        print(f"# Pega en Sheets ES y aplica:  {formula_es}")
+        print(f"# Paste into ES Sheets and apply:  {formula_es}")
     else:
-        print(f"# Pega en Sheets/Excel y aplica:  {formula_us}")
-    print(f"# {len(flows)-1} flujos + 1 valor final = {len(flows)} filas.")
+        print(f"# Paste into Sheets/Excel and apply:  {formula_us}")
+    print(f"# {len(flows)-1} flows + 1 final value = {len(flows)} rows.")
     print()
     print("date\tamount\tkind\ttitle")
     for ts, amount, kind, title in flows:

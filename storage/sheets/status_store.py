@@ -1,9 +1,6 @@
 """
 Status sheet persistence: a small visible tab that shows the timestamp of
 the last successful sync for each process (sync, portfolio, etc.).
-
-Persistencia de la pestaña 'Estado sync': pestaña pequeña visible donde se
-escribe el timestamp del último sync OK por proceso (sync, portfolio…).
 """
 from __future__ import annotations
 
@@ -15,11 +12,11 @@ import gspread
 
 
 class StatusStore:
-    """Wrapper sobre la pestaña de estado.
+    """Wrapper around the status tab.
 
-    `labels`: mapping de claves internas (p.ej. 'portfolio', 'sync') a las
-    etiquetas humanas que se muestran en la columna A. Configurable.
-    `tz`: zona horaria para los timestamps escritos.
+    `labels`: mapping of internal keys (e.g. 'portfolio', 'sync') to the
+    human-readable labels shown in column A. Configurable.
+    `tz`: time zone used for the timestamps written.
     """
 
     def __init__(
@@ -46,7 +43,7 @@ class StatusStore:
             return ws
 
     def write(self, key: str) -> None:
-        """Escribe `now` en la fila correspondiente a `key`. Crea la fila si falta."""
+        """Write `now` to the row corresponding to `key`. Creates the row if missing."""
         label = self.labels[key]
         ws = self._get_or_create_ws()
         col_a = ws.col_values(1)
