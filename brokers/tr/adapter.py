@@ -194,7 +194,7 @@ async def fetch_transactions(
     """Download TR timeline and convert relevant events to Transactions.
     Sorted ascending by `ts`. `gift_overrides` is forwarded to raw_event_to_tx.
     """
-    from tr_sync import fetch_tr_events
+    from brokers.tr.sync_io import fetch_tr_events
 
     not_before = since.timestamp() if since else 0.0
     raw_events = await fetch_tr_events(tr, not_before_ts=not_before)
@@ -436,7 +436,7 @@ async def fetch_snapshot(tr, *, tz: ZoneInfo) -> PortfolioSnapshot:
 
     Construye un PortfolioSnapshot a partir del portfolio compacto + cash de TR.
     """
-    from tr_sync import fetch_tr_portfolio_and_cash
+    from brokers.tr.sync_io import fetch_tr_portfolio_and_cash
 
     positions, cash = await fetch_tr_portfolio_and_cash(tr)
     pos_objs: list[Position] = []
