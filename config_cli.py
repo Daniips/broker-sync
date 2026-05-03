@@ -99,19 +99,287 @@ _HEADER = """\
 """
 
 
+def _ask_personal_blocks(cfg: dict, existing: dict) -> None:
+    """Walk the user through optional personalization blocks. Each section
+    has its own opt-in confirm so users can skip individually. `cfg` is
+    mutated in place; `existing` provides defaults so reconfiguring keeps
+    current values pre-filled.
+    """
+    if not questionary.confirm(
+        "\nConfigure advanced personalization now (insights blocks, alerts, "
+        "tax report, ignore patterns)? You can skip and use defaults.",
+        default=True,
+    ).ask():
+        return
+
+    # ── Ignore patterns ────────────────────────────────────────────────
+    # Per-section title patterns (substring match) drop matching events
+    # from the Sheet sync. Typical use: filter out a self-transfer that
+    # would otherwise duplicate income tracked in another account.
+    if questionary.confirm(
+        "Ignore specific events from the sync (e.g. self-transfers from "
+        "another account that would duplicate income)?",
+        default=False,
+    ).ask():
+        existing_ignore = existing.get("ignore_events") or {}
+        income_now = (existing_ignore.get("income") or {}).get("title_contains") or []
+        expenses_now = (existing_ignore.get("expenses") or {}).get("title_contains") or []
+        income_csv = questionary.text(
+            "Title patterns to IGNORE in incoming transfers "
+            "(comma-separated; empty for none):",
+            default=", ".join(income_now),
+        ).ask() or ""
+        expenses_csv = questionary.text(
+            "Title patterns to IGNORE in outgoing transfers "
+            "(comma-separated; empty for none):",
+            default=", ".join(expenses_now),
+        ).ask() or ""
+        income_list = [p.strip() for p in income_csv.split(",") if p.strip()]
+        expenses_list = [p.strip() for p in expenses_csv.split(",") if p.strip()]
+        if income_list or expenses_list:
+            cfg["ignore_events"] = {
+                "income": {"title_contains": income_list, "subtitle_contains": []},
+                "expenses": {"title_contains": expenses_list, "subtitle_contains": []},
+            }
+
+    # ── Concentration thresholds ───────────────────────────────────────
+    if questionary.confirm(
+        "Configure concentration alerts (warn when a position exceeds N% "
+        "of the portfolio)?",
+        default=False,
+    ).ask():
+        threshold_now = existing.get("concentration_threshold", 0.35) or 0.35
+        thr_str = questionary.text(
+            "Global threshold (% of portfolio, e.g. 35):",
+            default=f"{threshold_now * 100:.0f}",
+            validate=lambda v: True if (v.replace(".", "", 1).isdigit() and 0 < float(v) <= 100) else "Number between 0 and 100",
+        ).ask() or f"{threshold_now * 100:.0f}"
+        cfg["concentration_threshold"] = float(thr_str) / 100
+
+        existing_limits = dict(existing.get("concentration_limits") or {})
+        limits = dict(existing_limits)
+        if questionary.confirm(
+            "Add stricter per-asset limits (override the global threshold "
+            "for specific ISINs, e.g. crypto)?",
+            default=bool(existing_limits),
+        ).ask():
+            print("  Empty ISIN finishes the loop.")
+            while True:
+                isin = questionary.text("  ISIN with stricter limit:").ask()
+                if not isin or not isin.strip():
+                    break
+                isin = isin.strip()
+                cur = limits.get(isin, 0.10) * 100
+                pct_str = questionary.text(
+                    f"  Limit for {isin} (% of portfolio):",
+                    default=f"{cur:.0f}",
+                    validate=lambda v: True if (v.replace(".", "", 1).isdigit() and 0 < float(v) <= 100) else "Number between 0 and 100",
+                ).ask() or f"{cur:.0f}"
+                limits[isin] = float(pct_str) / 100
+        if limits:
+            cfg["concentration_limits"] = limits
+
+    # ── Asset currencies ───────────────────────────────────────────────
+    # Only meaningful if the portfolio_cell_map was populated; ask currency
+    # per ISIN so the currency-exposure block in `make insights` can break
+    # down EUR/USD/CRYPTO.
+    pcm = cfg.get("portfolio_cell_map") or []
+    if pcm and questionary.confirm(
+        "Configure denomination currency per asset (used by the currency "
+        "exposure block in insights)?",
+        default=False,
+    ).ask():
+        existing_curr = existing.get("asset_currencies") or {}
+        curr_map: dict = {}
+        for entry in pcm:
+            isin = entry.get("isin")
+            if not isin:
+                continue
+            label = entry.get("label", isin)
+            default_cur = existing_curr.get(isin, "USD")
+            cur = questionary.select(
+                f"  Currency for {isin} ({label}):",
+                choices=["USD", "EUR", "GBP", "CHF", "JPY", "CRYPTO"],
+                default=default_cur if default_cur in ("USD", "EUR", "GBP", "CHF", "JPY", "CRYPTO") else "USD",
+            ).ask() or default_cur
+            curr_map[isin] = cur
+        if curr_map:
+            cfg["asset_currencies"] = curr_map
+
+    # ── Benchmark ──────────────────────────────────────────────────────
+    if questionary.confirm(
+        "Set a benchmark to compare your MWR against in `make insights` "
+        "(e.g. SP500)?",
+        default=bool(existing.get("benchmark_isin")),
+    ).ask():
+        bench_isin = questionary.text(
+            "Benchmark ISIN (e.g. IE00B5BMR087 for the SP500):",
+            default=existing.get("benchmark_isin", ""),
+        ).ask() or ""
+        bench_isin = bench_isin.strip()
+        if bench_isin:
+            cfg["benchmark_isin"] = bench_isin
+            cfg["benchmark_label"] = questionary.text(
+                "Benchmark display label:",
+                default=existing.get("benchmark_label") or bench_isin,
+            ).ask() or bench_isin
+
+    # ── Cash targets ───────────────────────────────────────────────────
+    if questionary.confirm(
+        "Set cash targets (warn if cash held at the broker is below the "
+        "floor or above the ceiling)?",
+        default=bool(existing.get("cash_targets")),
+    ).ask():
+        existing_ct = existing.get("cash_targets") or {}
+        targets: dict = {}
+
+        min_default = existing_ct.get("min_eur")
+        min_str = questionary.text(
+            "Minimum cash floor (€ — empty to skip):",
+            default=str(int(min_default)) if isinstance(min_default, (int, float)) else "",
+        ).ask() or ""
+        if min_str.strip():
+            try:
+                targets["min_eur"] = float(min_str)
+            except ValueError:
+                pass
+
+        max_existing = existing_ct.get("max_eur")
+        existing_mode = "schedule" if isinstance(max_existing, dict) else (
+            "scalar" if isinstance(max_existing, (int, float)) else "skip"
+        )
+        max_mode = questionary.select(
+            "Maximum cash ceiling:",
+            choices=[
+                questionary.Choice("Fixed value (€)", value="scalar"),
+                questionary.Choice("Stepped schedule (€ per effective date)", value="schedule"),
+                questionary.Choice("Skip", value="skip"),
+            ],
+            default=existing_mode,
+        ).ask() or "skip"
+
+        if max_mode == "scalar":
+            scalar_default = max_existing if isinstance(max_existing, (int, float)) else None
+            max_str = questionary.text(
+                "Maximum cash (€):",
+                default=str(int(scalar_default)) if scalar_default is not None else "",
+            ).ask() or ""
+            if max_str.strip():
+                try:
+                    targets["max_eur"] = float(max_str)
+                except ValueError:
+                    pass
+        elif max_mode == "schedule":
+            print("  Define stepped breakpoints: ISO date (YYYY-MM-DD) → max € from that date.")
+            print("  Empty date finishes. The script picks the latest entry whose date <= today.")
+            schedule: dict = {}
+            existing_schedule = max_existing if isinstance(max_existing, dict) else {}
+            for k, v in sorted(existing_schedule.items()):
+                k_str = str(k) if not isinstance(k, str) else k
+                schedule[k_str] = float(v) if v is not None else None
+                print(f"    [existing] {k_str}: {v}")
+            while True:
+                date_str = questionary.text("  Effective from (YYYY-MM-DD):").ask()
+                if not date_str or not date_str.strip():
+                    break
+                date_str = date_str.strip()
+                amt_str = questionary.text(f"  Max cash from {date_str} (€):").ask() or ""
+                try:
+                    schedule[date_str] = float(amt_str)
+                except ValueError:
+                    print(f"    Skipped (not a number): {amt_str!r}")
+            if schedule:
+                targets["max_eur"] = schedule
+
+        if targets:
+            cfg["cash_targets"] = targets
+
+    # ── Income / expense overrides ─────────────────────────────────────
+    if questionary.confirm(
+        "Set declared monthly income / expense overrides (only needed if "
+        "your real flows are not all visible to the broker)?",
+        default=bool(existing.get("monthly_income_eur") or existing.get("monthly_expenses_eur")),
+    ).ask():
+        inc_default = existing.get("monthly_income_eur")
+        inc_str = questionary.text(
+            "Declared monthly income (€/m, empty to auto-derive from broker DEPOSITs):",
+            default=str(int(inc_default)) if isinstance(inc_default, (int, float)) else "",
+        ).ask() or ""
+        if inc_str.strip():
+            try:
+                cfg["monthly_income_eur"] = float(inc_str)
+            except ValueError:
+                pass
+
+        exp_default = existing.get("monthly_expenses_eur")
+        exp_str = questionary.text(
+            "Declared monthly expenses (€/m, empty to auto-derive from broker WITHDRAWALs):",
+            default=str(int(exp_default)) if isinstance(exp_default, (int, float)) else "",
+        ).ask() or ""
+        if exp_str.strip():
+            try:
+                cfg["monthly_expenses_eur"] = float(exp_str)
+            except ValueError:
+                pass
+
+    # ── Renta (Spanish IRPF) ───────────────────────────────────────────
+    if questionary.confirm(
+        "Configure the Spanish IRPF tax report (`make renta`)? "
+        "Skip if you don't file taxes in Spain.",
+        default=bool(existing.get("renta")),
+    ).ask():
+        existing_renta = existing.get("renta") or {}
+        all_sections = (
+            ("fifo", "Capital gains/losses (FIFO)"),
+            ("dividends", "Dividends (casilla 0029)"),
+            ("interest", "Interest (casilla 0027)"),
+            ("bonds", "Bonds / other financial assets (casilla 0031)"),
+            ("summary_by_box", "Summary by casilla (cross-check vs draft)"),
+            ("retentions", "Foreign withholdings by country"),
+            ("saveback", "Saveback received"),
+            ("crypto", "Crypto position (Modelo 721)"),
+            ("modelo720", "Total broker balance (informative Modelo 720)"),
+        )
+        choices = [
+            questionary.Choice(label, value=key, checked=existing_renta.get(key, True))
+            for key, label in all_sections
+        ]
+        selected = questionary.checkbox(
+            "Sections to include in the IRPF report:",
+            choices=choices,
+        ).ask()
+        if selected is not None:
+            cfg["renta"] = {key: (key in selected) for key, _ in all_sections}
+
+
 def cmd_init(args):
-    """Interactive wizard. Asks step by step and writes config.yaml."""
+    """Interactive wizard. Asks step by step and writes config.yaml.
+
+    If config.yaml already exists, its current values are used as defaults
+    so the wizard doubles as a reconfigure tool. Fields the wizard does
+    not ask about (e.g. gift_cost_overrides, init_sheet_headers,
+    subtitle_translations) are preserved from the existing file.
+    """
     print("\n🛠  tr-sync configuration wizard\n")
 
-    if not _confirm_overwrite(CONFIG_PATH):
-        print("Aborted.")
-        return 1
-
-    cfg: dict = {}
+    existing: dict = _load_yaml(CONFIG_PATH) if CONFIG_PATH.exists() else {}
+    if existing:
+        print(f"📄 Existing {CONFIG_PATH.name} detected — current values "
+              f"will be used as defaults.")
+        if not questionary.confirm(
+            "Continue (the file will be rewritten when the wizard finishes)?",
+            default=True,
+        ).ask():
+            print("Aborted.")
+            return 1
+        cfg: dict = dict(existing)  # preserve fields the wizard does not ask about
+    else:
+        cfg = {}
 
     # ── Sheet ID ──
     sheet_id = questionary.text(
         "ID of your Google Sheet (from the URL: docs.google.com/spreadsheets/d/<THIS_ID>/edit):",
+        default=existing.get("sheet_id", ""),
         validate=lambda v: True if v and not v.startswith("REEMPLAZA") and not v.startswith("REPLACE") else "Paste the actual ID",
     ).ask()
     if sheet_id is None:
@@ -119,13 +387,14 @@ def cmd_init(args):
     cfg["sheet_id"] = sheet_id.strip()
 
     # ── Features (toggles) ──
+    existing_features = existing.get("features") or {}
     features = questionary.checkbox(
         "Which parts of your Sheet to sync (space to toggle):",
         choices=[
-            questionary.Choice("Expenses", value="expenses", checked=True),
-            questionary.Choice("Income", value="income", checked=True),
-            questionary.Choice("Investments (Dinero invertido YYYY)", value="investments", checked=True),
-            questionary.Choice("Portfolio (Calculo ganancias)", value="portfolio", checked=True),
+            questionary.Choice("Expenses", value="expenses", checked=existing_features.get("expenses", True)),
+            questionary.Choice("Income", value="income", checked=existing_features.get("income", True)),
+            questionary.Choice("Investments", value="investments", checked=existing_features.get("investments", True)),
+            questionary.Choice("Portfolio", value="portfolio", checked=existing_features.get("portfolio", True)),
         ],
     ).ask()
     if features is None:
@@ -133,73 +402,79 @@ def cmd_init(args):
     cfg["features"] = {k: (k in features) for k in ("expenses", "income", "investments", "portfolio")}
 
     # ── Tabs ──
-    cfg["sheets"] = {}
+    existing_sheets = existing.get("sheets") or {}
+    cfg["sheets"] = dict(existing_sheets)
     if cfg["features"]["expenses"]:
         cfg["sheets"]["expenses"] = questionary.text(
             "Name of the expenses tab:",
-            default="Gastos",
-        ).ask() or "Gastos"
+            default=existing_sheets.get("expenses", "Gastos"),
+        ).ask() or existing_sheets.get("expenses", "Gastos")
         cfg["sheets"]["expenses_layout"] = questionary.select(
             "Layout of the expenses tab:",
             choices=[
                 questionary.Choice("monthly_columns — months as column pairs (Concepto+Importe)", value="monthly_columns"),
                 questionary.Choice("ledger — one row per event with Date/Concept/Amount", value="ledger"),
             ],
-            default="monthly_columns",
+            default=existing_sheets.get("expenses_layout", "monthly_columns"),
         ).ask() or "monthly_columns"
     if cfg["features"]["income"]:
         cfg["sheets"]["income"] = questionary.text(
             "Name of the income tab:",
-            default="Ingresos",
-        ).ask() or "Ingresos"
+            default=existing_sheets.get("income", "Ingresos"),
+        ).ask() or existing_sheets.get("income", "Ingresos")
         cfg["sheets"]["income_layout"] = questionary.select(
             "Layout of the income tab:",
             choices=[
                 questionary.Choice("monthly_columns", value="monthly_columns"),
                 questionary.Choice("ledger", value="ledger"),
             ],
-            default="monthly_columns",
+            default=existing_sheets.get("income_layout", "monthly_columns"),
         ).ask() or "monthly_columns"
 
     if cfg["features"]["investments"]:
         cfg["sheets"]["investments_year_format"] = questionary.text(
             "Pattern for the investments tab name (must contain {year}):",
-            default="Dinero invertido {year}",
+            default=existing_sheets.get("investments_year_format", "Dinero invertido {year}"),
             validate=lambda v: True if "{year}" in v else "Must contain {year}",
-        ).ask() or "Dinero invertido {year}"
+        ).ask() or existing_sheets.get("investments_year_format", "Dinero invertido {year}")
 
     if cfg["features"]["portfolio"]:
         cfg["sheets"]["portfolio"] = questionary.text(
             "Name of the portfolio tab:",
-            default="Calculo ganancias",
-        ).ask() or "Calculo ganancias"
+            default=existing_sheets.get("portfolio", "Calculo ganancias"),
+        ).ask() or existing_sheets.get("portfolio", "Calculo ganancias")
 
     cfg["sheets"]["status"] = questionary.text(
         "Name of the sync-status tab (the script will create it):",
-        default="Estado sync",
-    ).ask() or "Estado sync"
+        default=existing_sheets.get("status", "Estado sync"),
+    ).ask() or existing_sheets.get("status", "Estado sync")
     cfg["sheets"]["sync_state"] = questionary.text(
         "Name of the hidden internal-dedup tab:",
-        default="_sync_state",
-    ).ask() or "_sync_state"
+        default=existing_sheets.get("sync_state", "_sync_state"),
+    ).ask() or existing_sheets.get("sync_state", "_sync_state")
 
     # ── Markers for the monthly_columns layout ──
     if (cfg["sheets"].get("expenses_layout") == "monthly_columns"
             or cfg["sheets"].get("income_layout") == "monthly_columns"):
+        existing_markers = existing.get("summary_markers") or {}
         print("\nMarkers the script searches for at the end of each month to find the summary block.")
         if cfg["sheets"].get("expenses_layout") == "monthly_columns":
+            default_e = ", ".join(existing_markers.get("expenses") or
+                                  ["gastos innecesarios", "gastos totales", "extraordinarios"])
             markers_e = questionary.text(
                 "Expenses markers (comma-separated):",
-                default="gastos innecesarios, gastos totales, extraordinarios",
-            ).ask() or ""
+                default=default_e,
+            ).ask() or default_e
             cfg.setdefault("summary_markers", {})["expenses"] = [
                 m.strip() for m in markers_e.split(",") if m.strip()
             ]
         if cfg["sheets"].get("income_layout") == "monthly_columns":
+            default_i = ", ".join(existing_markers.get("income") or
+                                  ["ingresos totales", "ingresos", "totales"])
             markers_i = questionary.text(
                 "Income markers (comma-separated):",
-                default="ingresos totales, ingresos, totales",
-            ).ask() or ""
+                default=default_i,
+            ).ask() or default_i
             cfg.setdefault("summary_markers", {})["income"] = [
                 m.strip() for m in markers_i.split(",") if m.strip()
             ]
@@ -209,54 +484,79 @@ def cmd_init(args):
         print("\nLet's define the ISIN → row mapping for the Portfolio tab.")
         cfg["portfolio_value_range"] = questionary.text(
             "A1 range where current values are written (e.g. C2:C8):",
-            default="C2:C8",
+            default=existing.get("portfolio_value_range", "C2:C8"),
             validate=lambda v: True if ":" in v else "Must be an A1 range like C2:C8",
-        ).ask() or "C2:C8"
+        ).ask() or existing.get("portfolio_value_range", "C2:C8")
 
-        n = questionary.text(
-            "How many assets are you going to track in the portfolio?",
-            default="7",
-            validate=lambda v: v.isdigit() and int(v) > 0 or "Positive integer",
-        ).ask() or "7"
-        n = int(n)
+        existing_pcm = existing.get("portfolio_cell_map") or []
+        keep_pcm = bool(existing_pcm) and questionary.confirm(
+            f"Keep the existing portfolio_cell_map ({len(existing_pcm)} entries)?",
+            default=True,
+        ).ask()
+        if keep_pcm:
+            cfg["portfolio_cell_map"] = list(existing_pcm)
+        else:
+            n = questionary.text(
+                "How many assets are you going to track in the portfolio?",
+                default=str(len(existing_pcm) or 7),
+                validate=lambda v: v.isdigit() and int(v) > 0 or "Positive integer",
+            ).ask() or "7"
+            n = int(n)
 
-        cfg["portfolio_cell_map"] = []
-        for i in range(n):
-            isin = questionary.text(f"  Asset {i+1} — ISIN:").ask()
-            if not isin:
-                break
-            label = questionary.text(f"  Asset {i+1} — Short label:").ask()
-            cfg["portfolio_cell_map"].append({"isin": isin.strip(), "label": (label or isin).strip()})
+            cfg["portfolio_cell_map"] = []
+            for i in range(n):
+                isin_default = existing_pcm[i]["isin"] if i < len(existing_pcm) else ""
+                label_default = existing_pcm[i].get("label", "") if i < len(existing_pcm) else ""
+                isin = questionary.text(f"  Asset {i+1} — ISIN:", default=isin_default).ask()
+                if not isin:
+                    break
+                label = questionary.text(f"  Asset {i+1} — Short label:", default=label_default).ask()
+                cfg["portfolio_cell_map"].append({"isin": isin.strip(), "label": (label or isin).strip()})
 
     # ── Asset name map ──
     if cfg["features"]["investments"]:
-        print("\nMapping of TR names to your Investments tab.")
-        print("E.g. 'Core S&P 500 USD (Acc)' → 'SP 500'. Press Enter on an empty ISIN to finish.")
-        amap: dict = {}
-        while True:
-            tr_name = questionary.text("  Name TR uses (empty to finish):").ask()
-            if not tr_name:
-                break
-            display = questionary.text("  Name as it appears in your tab:").ask()
-            if display:
-                amap[tr_name.strip()] = display.strip()
-        if amap:
-            cfg["asset_name_map"] = amap
+        existing_amap = existing.get("asset_name_map") or {}
+        keep_amap = bool(existing_amap) and questionary.confirm(
+            f"Keep the existing asset_name_map ({len(existing_amap)} entries)?",
+            default=True,
+        ).ask()
+        if keep_amap:
+            cfg["asset_name_map"] = dict(existing_amap)
+        else:
+            print("\nMapping of TR names to your Investments tab.")
+            print("E.g. 'Core S&P 500 USD (Acc)' → 'SP 500'. Press Enter on an empty TR name to finish.")
+            amap: dict = {}
+            while True:
+                tr_name = questionary.text("  Name TR uses (empty to finish):").ask()
+                if not tr_name:
+                    break
+                display = questionary.text("  Name as it appears in your tab:").ask()
+                if display:
+                    amap[tr_name.strip()] = display.strip()
+            if amap:
+                cfg["asset_name_map"] = amap
 
     # ── Crypto (optional) ──
+    crypto_default = ", ".join(existing.get("crypto_isins") or [])
     crypto = questionary.text(
         "Crypto ISINs in your portfolio (comma-separated, empty if none):",
-        default="",
-    ).ask() or ""
+        default=crypto_default,
+    ).ask() or crypto_default
     crypto_list = [c.strip() for c in crypto.split(",") if c.strip()]
     if crypto_list:
         cfg["crypto_isins"] = crypto_list
 
+    # ── Advanced personalization (optional sections) ──
+    _ask_personal_blocks(cfg, existing)
+
     # ── Timezone and buffer ──
-    cfg["timezone"] = questionary.text("Time zone:", default="Europe/Madrid").ask() or "Europe/Madrid"
+    cfg["timezone"] = questionary.text(
+        "Time zone:",
+        default=existing.get("timezone", "Europe/Madrid"),
+    ).ask() or existing.get("timezone", "Europe/Madrid")
     cfg["default_buffer_days"] = int(questionary.text(
         "Buffer days when downloading the month's events:",
-        default="7",
+        default=str(existing.get("default_buffer_days", 7)),
         validate=lambda v: v.isdigit() and int(v) >= 0 or "Integer >= 0",
     ).ask() or "7")
 

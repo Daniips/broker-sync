@@ -9,13 +9,14 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 PYTR := $(VENV)/bin/pytr
 
-.PHONY: help setup login init-sheet doctor sync portfolio verify inspect test renta insights features config all refresh-cookie upload-secret clear-cache
+.PHONY: help setup login init-sheet doctor sync portfolio verify inspect test renta insights features config config-init config-show config-validate config-features reconfigure all refresh-cookie upload-secret clear-cache
 
 help:
 	@echo "Setup:"
 	@echo "  make setup            create .venv and install dependencies"
 	@echo "  make login            pytr login (interactive, SMS if cookie expired)"
 	@echo "  make config-init      interactive wizard to create config.yaml"
+	@echo "  make reconfigure      re-run the wizard with current values as defaults"
 	@echo "  make init-sheet       create the missing tabs in your Google Sheet"
 	@echo "  make doctor           verify the setup is ready (config, OAuth, tabs, session)"
 	@echo ""
@@ -49,9 +50,10 @@ setup:
 	$(PYTHON) -m pip install --upgrade pip
 	$(PYTHON) -m pip install -r requirements.txt
 	@echo ""
-	@echo "✅ Setup done. Now:"
-	@echo "   1) Copy config.example.yaml to config.yaml and fill it in"
-	@echo "   2) make login"
+	@echo "✅ Dependencies installed. Now:"
+	@echo "   1) make config-init    interactive wizard to create config.yaml"
+	@echo "   2) make login          pytr login (interactive, may require SMS)"
+	@echo "   3) make doctor         verify the setup is ready"
 
 login:
 	$(PYTR) login --store_credentials
@@ -64,6 +66,10 @@ doctor:
 
 config-init:
 	$(PYTHON) tr_sync.py config init
+
+# Alias: re-runs the wizard against the existing config.yaml; current
+# values pre-fill as defaults so it doubles as a reconfigure tool.
+reconfigure: config-init
 
 config-show:
 	$(PYTHON) tr_sync.py config show
