@@ -33,6 +33,7 @@ not pay for them. The `bonus_as` parameter controls treatment:
 """
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Literal, Optional
@@ -745,4 +746,431 @@ def contribution_vs_average(
         "avg": avg,
         "delta_pct": delta_pct,
         "window_months_used": len(nonzero),
+    }
+
+
+def monthly_deposits(
+    txs: list[Transaction],
+    *,
+    net_of_withdrawals: bool = True,
+) -> dict[tuple[int, int], float]:
+    """{(year, month): net external cash entering the broker account}.
+
+    Sums DEPOSITs (incoming transfers, including self-transfers from the
+    user's own bank account) and subtracts WITHDRAWALs when
+    `net_of_withdrawals=True`. Doesn't touch BUYs/SELLs/dividends —
+    those are *internal* moves of the broker cash, not external savings.
+
+    Useful as a proxy for the user's savings rate flowing into the broker
+    (≈ how much of their salary ends up at TR each month, regardless of
+    whether it gets invested or stays as cash).
+    """
+    out: dict[tuple[int, int], float] = defaultdict(float)
+    for tx in txs:
+        key = (tx.ts.year, tx.ts.month)
+        if tx.kind == TxKind.DEPOSIT:
+            out[key] += abs(tx.amount_eur)
+        elif tx.kind == TxKind.WITHDRAWAL and net_of_withdrawals:
+            out[key] -= abs(tx.amount_eur)
+    return dict(out)
+
+
+def savings_projection(
+    current_cash: float,
+    current_positions: float,
+    monthly_contribution: float,
+    monthly_deposit: float,
+    annual_return: float,
+    targets: list[float],
+    *,
+    now: datetime,
+    max_months: int = 1200,
+) -> dict:
+    """Compound projection: ETA to reach each target.
+
+    Pure numeric function. Caller decides policy (which months to average,
+    whether to use empirical MWR or a fallback rate, etc.).
+
+    Model — each simulated month:
+      positions ← positions × (1 + r/12) + monthly_contribution
+      cash      ← cash + (monthly_deposit − monthly_contribution)
+
+    Rationale: `monthly_deposit` is total external cash flowing into the
+    broker (e.g. salary transferred from the user's own bank account).
+    `monthly_contribution` is the part of that cash that gets invested
+    each month (BUYs). The leftover stays in cash. Both add toward the
+    target; only positions compound.
+
+    Cash can go negative if `monthly_contribution > monthly_deposit` —
+    interpret as the user investing from existing reserves. Not capped.
+
+    Stops simulation at `max_months` (default 1200 ≈ 100 years).
+
+    Returns: current, current_cash, current_positions, monthly_contribution,
+    monthly_deposit, monthly_cash_flow, annual_return, targets[].
+    """
+    r_monthly = (1 + annual_return) ** (1 / 12) - 1 if annual_return > -1 else 0.0
+    cash_flow = monthly_deposit - monthly_contribution
+    current_total = current_cash + current_positions
+
+    targets_out = []
+    for t in sorted(targets):
+        remaining = t - current_total
+        if remaining <= 0:
+            targets_out.append({
+                "target": t, "remaining": 0.0, "months": 0.0,
+                "eta": now, "status": "reached",
+            })
+            continue
+
+        pos = current_positions
+        cash = current_cash
+        months = 0
+        while pos + cash < t and months < max_months:
+            pos = pos * (1 + r_monthly) + monthly_contribution
+            cash = cash + cash_flow
+            months += 1
+
+        if months >= max_months:
+            targets_out.append({
+                "target": t, "remaining": remaining, "months": None,
+                "eta": None, "status": "non_reachable",
+            })
+            continue
+
+        # Refine with linear interpolation across the last simulated month
+        # so the ETA isn't over-rounded.
+        prev_total = (pos - monthly_contribution) / (1 + r_monthly) + (cash - cash_flow) if months > 0 else current_total
+        if months > 0 and pos + cash > t:
+            frac = (t - prev_total) / ((pos + cash) - prev_total) if (pos + cash) > prev_total else 1.0
+            n = (months - 1) + max(0.0, min(1.0, frac))
+        else:
+            n = float(months)
+        eta = now + timedelta(days=n * 30.4375)
+        targets_out.append({
+            "target": t, "remaining": remaining, "months": n,
+            "eta": eta, "status": "projected",
+        })
+
+    return {
+        "current": current_total,
+        "current_cash": current_cash,
+        "current_positions": current_positions,
+        "monthly_contribution": monthly_contribution,
+        "monthly_deposit": monthly_deposit,
+        "monthly_cash_flow": cash_flow,
+        "annual_return": annual_return,
+        "targets": targets_out,
+    }
+
+
+# ── Risk / efficiency metrics ────────────────────────────────────────────
+#
+# All built on top of monthly Modified Dietz returns derived from the
+# snapshot history. With dense snapshots they converge to true TWR-derived
+# numbers; with sparse history they're noisy approximations gated by the
+# caller (display layer decides whether to show).
+
+
+def _resample_monthly(snapshots: list[dict]) -> list[dict]:
+    """Latest snapshot per calendar month, sorted ascending."""
+    by_month: dict[tuple[int, int], dict] = {}
+    for s in sorted(snapshots, key=lambda x: x["ts"]):
+        by_month[(s["ts"].year, s["ts"].month)] = s
+    return [by_month[k] for k in sorted(by_month.keys())]
+
+
+def _modified_dietz_return(
+    s_begin: dict,
+    s_end: dict,
+    txs: list[Transaction],
+    *,
+    bonus_as: BonusAs = "income",
+) -> Optional[float]:
+    """Modified Dietz return for the period (s_begin.ts, s_end.ts] on the
+    invested portfolio. Flows: BUY (inflow), SELL (outflow). Saveback per
+    `bonus_as`. Dividends ignored (assumes accumulating ETFs)."""
+    V0 = s_begin["positions_value_eur"]
+    V1 = s_end["positions_value_eur"]
+    period_s = (s_end["ts"] - s_begin["ts"]).total_seconds()
+    if period_s <= 0 or V0 <= 0:
+        return None
+    net_flow = 0.0
+    weighted = 0.0
+    for tx in txs:
+        if not (s_begin["ts"] < tx.ts <= s_end["ts"]):
+            continue
+        if _is_invested_buy(tx, bonus_as=bonus_as):
+            f = abs(tx.amount_eur)
+        elif tx.kind == TxKind.SELL:
+            f = -abs(tx.amount_eur)
+        else:
+            continue
+        net_flow += f
+        # Fraction of period remaining after the flow.
+        weighted += ((s_end["ts"] - tx.ts).total_seconds() / period_s) * f
+    denom = V0 + weighted
+    if denom <= 0:
+        return None
+    return (V1 - V0 - net_flow) / denom
+
+
+def monthly_returns(
+    txs: list[Transaction],
+    snapshot_history: list[dict],
+    snapshot: PortfolioSnapshot,
+    *,
+    bonus_as: BonusAs = "income",
+) -> list[tuple[datetime, float]]:
+    """Series of (month_end_ts, sub-period return). One entry per pair of
+    consecutive monthly snapshots. Useful for vol / Sharpe / alpha."""
+    history = list(snapshot_history) + [{
+        "ts": snapshot.ts,
+        "cash_eur": snapshot.cash_eur,
+        "positions_value_eur": snapshot.positions_value_eur,
+        "total_eur": snapshot.total_eur,
+    }]
+    monthly_snaps = _resample_monthly(history)
+    out: list[tuple[datetime, float]] = []
+    for i in range(1, len(monthly_snaps)):
+        r = _modified_dietz_return(
+            monthly_snaps[i - 1], monthly_snaps[i], txs, bonus_as=bonus_as,
+        )
+        if r is not None:
+            out.append((monthly_snaps[i]["ts"], r))
+    return out
+
+
+def twr(
+    txs: list[Transaction],
+    snapshot_history: list[dict],
+    snapshot: PortfolioSnapshot,
+    *,
+    bonus_as: BonusAs = "income",
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> Optional[float]:
+    """Time-Weighted Return (annualized). Geometric link of monthly Modified
+    Dietz sub-period returns. Strips the timing-of-flows effect that MWR
+    embeds — the right metric to compare against a benchmark."""
+    series = monthly_returns(txs, snapshot_history, snapshot, bonus_as=bonus_as)
+    if start is not None:
+        series = [(ts, r) for ts, r in series if ts > start]
+    if end is not None:
+        series = [(ts, r) for ts, r in series if ts <= end]
+    if len(series) < 1:
+        return None
+    growth = 1.0
+    for _, r in series:
+        growth *= (1 + r)
+    # Annualize using elapsed time of the included sub-periods.
+    first_ts = series[0][0]
+    last_ts = series[-1][0]
+    # Subtract one month from first to get the period start.
+    days_total = (last_ts - first_ts).days + 30  # +30 ≈ first sub-period's span
+    if days_total <= 0 or growth <= 0:
+        return None
+    return growth ** (365.25 / days_total) - 1
+
+
+def benchmark_monthly_returns(
+    price_history: list[dict],
+) -> list[tuple[datetime, float]]:
+    """Monthly returns of a benchmark from its price bars (uses the latest
+    close per calendar month)."""
+    if not price_history:
+        return []
+    by_month: dict[tuple[int, int], tuple[datetime, float]] = {}
+    for bar in price_history:
+        key = (bar["ts"].year, bar["ts"].month)
+        if key not in by_month or bar["ts"] > by_month[key][0]:
+            by_month[key] = (bar["ts"], bar["close"])
+    sorted_pairs = [by_month[k] for k in sorted(by_month.keys())]
+    out: list[tuple[datetime, float]] = []
+    for i in range(1, len(sorted_pairs)):
+        prev_ts, prev_p = sorted_pairs[i - 1]
+        cur_ts, cur_p = sorted_pairs[i]
+        if prev_p > 0:
+            out.append((cur_ts, (cur_p - prev_p) / prev_p))
+    return out
+
+
+def max_drawdown(
+    monthly_return_series: list[tuple[datetime, float]],
+) -> Optional[dict]:
+    """Worst peak-to-trough drawdown of the portfolio's wealth index
+    (cumulative product of monthly returns). Strips contribution effect:
+    a portfolio that's down 5 % but masked by deposits still shows −5 %.
+
+    Returns {max_dd_pct, peak_ts, trough_ts, recovery_ts, days_to_trough,
+    days_to_recovery} or None if no drawdown.
+    """
+    if len(monthly_return_series) < 2:
+        return None
+    # Build wealth index starting at 1.0 at the first return's date.
+    wealth: list[tuple[datetime, float]] = []
+    w = 1.0
+    for ts, r in monthly_return_series:
+        w *= (1 + r)
+        wealth.append((ts, w))
+    running_peak = wealth[0][1]
+    running_peak_ts = wealth[0][0]
+    max_dd = 0.0
+    out_peak_ts = running_peak_ts
+    out_trough_ts = running_peak_ts
+    for ts, v in wealth:
+        if v > running_peak:
+            running_peak = v
+            running_peak_ts = ts
+        if running_peak > 0:
+            dd = (running_peak - v) / running_peak
+            if dd > max_dd:
+                max_dd = dd
+                out_peak_ts = running_peak_ts
+                out_trough_ts = ts
+    if max_dd <= 0:
+        return None
+    # Find the wealth-index value at peak and check recovery after trough.
+    peak_w = next(v for ts, v in wealth if ts == out_peak_ts)
+    recovery_ts = None
+    for ts, v in wealth:
+        if ts > out_trough_ts and v >= peak_w:
+            recovery_ts = ts
+            break
+    return {
+        "max_dd_pct": max_dd,
+        "peak_ts": out_peak_ts,
+        "trough_ts": out_trough_ts,
+        "recovery_ts": recovery_ts,
+        "days_to_trough": (out_trough_ts - out_peak_ts).days,
+        "days_to_recovery": (recovery_ts - out_trough_ts).days if recovery_ts else None,
+    }
+
+
+def savings_ratio(
+    monthly_contribs: dict[tuple[int, int], float],
+    monthly_deps: dict[tuple[int, int], float],
+    *,
+    now: datetime,
+    months_window: int = 6,
+) -> Optional[dict]:
+    """% of net deposits that gets invested vs accumulated as cash.
+
+    Looks at the last `months_window` completed months. None if there were
+    no positive deposits in the window.
+    """
+    contribs: list[float] = []
+    deps: list[float] = []
+    y, m = now.year, now.month
+    for _ in range(months_window):
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+        contribs.append(monthly_contribs.get((y, m), 0.0))
+        deps.append(monthly_deps.get((y, m), 0.0))
+    total_c = sum(contribs)
+    total_d = sum(deps)
+    if total_d <= 0:
+        return None
+    return {
+        "invested": total_c,
+        "deposited": total_d,
+        "cash_pile": total_d - total_c,
+        "ratio": total_c / total_d,
+        "months_used": len(contribs),
+    }
+
+
+def _stdev(xs: list[float]) -> Optional[float]:
+    n = len(xs)
+    if n < 2:
+        return None
+    mean = sum(xs) / n
+    var = sum((x - mean) ** 2 for x in xs) / (n - 1)
+    return var ** 0.5
+
+
+def volatility_annualized(
+    monthly_return_series: list[tuple[datetime, float]],
+) -> Optional[float]:
+    """Annualized volatility from monthly returns (σ × √12)."""
+    rets = [r for _, r in monthly_return_series]
+    s = _stdev(rets)
+    if s is None:
+        return None
+    return s * (12 ** 0.5)
+
+
+def sharpe_ratio(
+    annualized_return: Optional[float],
+    annualized_vol: Optional[float],
+    *,
+    risk_free: float = 0.02,
+) -> Optional[float]:
+    """(annualized_return − risk_free) / annualized_vol. None if vol≤0."""
+    if annualized_return is None or annualized_vol is None or annualized_vol <= 0:
+        return None
+    return (annualized_return - risk_free) / annualized_vol
+
+
+def tracking_error_annualized(
+    portfolio_monthly_returns: list[tuple[datetime, float]],
+    benchmark_monthly_returns_: list[tuple[datetime, float]],
+) -> Optional[dict]:
+    """σ of (portfolio_return − benchmark_return) per month, annualized.
+
+    Returns {tracking_error, avg_active_return_annual, n_months} or None
+    if fewer than 2 overlapping months.
+    """
+    bench_by_month = {(ts.year, ts.month): r for ts, r in benchmark_monthly_returns_}
+    diffs: list[float] = []
+    for ts, port_r in portfolio_monthly_returns:
+        b = bench_by_month.get((ts.year, ts.month))
+        if b is not None:
+            diffs.append(port_r - b)
+    if len(diffs) < 2:
+        return None
+    s = _stdev(diffs)
+    if s is None:
+        return None
+    return {
+        "tracking_error": s * (12 ** 0.5),
+        "avg_active_return_annual": (sum(diffs) / len(diffs)) * 12,
+        "n_months": len(diffs),
+    }
+
+
+def alpha_beta(
+    portfolio_monthly_returns: list[tuple[datetime, float]],
+    benchmark_monthly_returns_: list[tuple[datetime, float]],
+    *,
+    min_months: int = 6,
+) -> Optional[dict]:
+    """OLS regression of portfolio monthly returns vs benchmark.
+    β = cov(p, b) / var(b);  α_monthly = mean(p) − β × mean(b).
+    Annualized α reported. Needs ≥`min_months` overlapping months.
+    """
+    bench_by_month = {(ts.year, ts.month): r for ts, r in benchmark_monthly_returns_}
+    pairs: list[tuple[float, float]] = []
+    for ts, p in portfolio_monthly_returns:
+        b = bench_by_month.get((ts.year, ts.month))
+        if b is not None:
+            pairs.append((p, b))
+    if len(pairs) < min_months:
+        return None
+    n = len(pairs)
+    mp = sum(p for p, _ in pairs) / n
+    mb = sum(b for _, b in pairs) / n
+    cov = sum((p - mp) * (b - mb) for p, b in pairs) / (n - 1)
+    var_b = sum((b - mb) ** 2 for _, b in pairs) / (n - 1)
+    # Guard against numerically-degenerate benchmarks (e.g. flat series).
+    if var_b <= 1e-10:
+        return None
+    beta = cov / var_b
+    alpha_monthly = mp - beta * mb
+    return {
+        "alpha_annual": alpha_monthly * 12,
+        "beta": beta,
+        "n_months": n,
     }

@@ -1,5 +1,6 @@
 """--insights: print net worth, MWR and other portfolio insights to stdout."""
 from datetime import datetime, timedelta
+from typing import Optional
 
 from tr_sync import (
     ASSET_CURRENCIES,
@@ -42,18 +43,29 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
         return
 
     from core.metrics import (
+        alpha_beta,
+        benchmark_monthly_returns,
         benchmark_return,
         concentration,
         contribution_vs_average,
         cost_basis_total as _cb_total,
         cost_basis_user_paid_per_isin,
         currency_exposure,
+        max_drawdown,
         monthly_contributions,
+        monthly_deposits,
+        monthly_returns,
         mwr,
         per_position_attribution,
+        savings_projection,
+        savings_ratio,
+        sharpe_ratio,
         total_invested,
+        tracking_error_annualized,
+        twr,
         unrealized_return,
         unrealized_return_user_paid,
+        volatility_annualized,
     )
 
     benchmark_isins = (BENCHMARK_ISIN,) if BENCHMARK_ISIN else ()
@@ -84,6 +96,34 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
     def fmt_eur(x):
         s = f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         return f"{s} €"
+
+    def _round_up_nice(x: float) -> float:
+        """Round x up to a 'nice' round number (1, 1.5, 2, 2.5, 3, 5, 7.5 × 10^k)."""
+        import math
+        if x <= 0:
+            return 0.0
+        mag = 10 ** math.floor(math.log10(x))
+        for n in (1, 1.5, 2, 2.5, 3, 5, 7.5, 10):
+            cand = n * mag
+            if cand >= x:
+                return cand
+        return 10 * mag
+
+    def _compute_targets(current: float) -> list[float]:
+        """Wealth milestones based on current total. 2x / 4x / 6x / 10x rounded."""
+        if current <= 0:
+            return [10_000.0, 25_000.0, 50_000.0, 100_000.0]
+        out: list[float] = []
+        for m in (2, 4, 6, 10):
+            t = _round_up_nice(current * m)
+            if not out or t > out[-1]:
+                out.append(t)
+        return out
+
+    # Shared series used by the projection, savings ratio, and risk blocks.
+    monthly = monthly_contributions(txs)
+    deposits_by_month = monthly_deposits(txs)
+    port_monthly_returns = monthly_returns(txs, snapshot_history, snapshot)
 
     crypto_value = sum(p.net_value_eur for p in snapshot.positions if p.isin in CRYPTO_ISINS)
     etf_value = snapshot.positions_value_eur - crypto_value
@@ -131,12 +171,15 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
     ytd_value = snapshot_value_at(snapshot_history, ytd_start) if snapshot_history else None
     twelvem_value = snapshot_value_at(snapshot_history, twelvem_start) if snapshot_history else None
 
+    mwr_all_income: Optional[float] = None
     for label, mode in (
         ("Mi dinero (saveback como income — default)", "income"),
         ("Incluyendo saveback como aportación", "deposit"),
     ):
         invested = total_invested(txs, bonus_as=mode)
         mwr_all = mwr(txs, snapshot, bonus_as=mode)
+        if mode == "income":
+            mwr_all_income = mwr_all
         mwr_ytd = mwr(txs, snapshot, bonus_as=mode, start=ytd_start, start_value=ytd_value) if ytd_value else None
         mwr_12m = mwr(txs, snapshot, bonus_as=mode, start=twelvem_start, start_value=twelvem_value) if twelvem_value else None
         print(f"  ── {label} ──")
@@ -151,54 +194,151 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
         print(f"    al inicio del periodo. Cada `make insights/sync/portfolio` añade uno.")
         print()
 
-    # Benchmark vs MWR
+    # Benchmark vs MWR + TWR. MWR refleja "qué hizo MI dinero" (incluye
+    # timing); TWR refleja "qué hizo la estrategia" (sin timing) — esta es
+    # la comparación honesta contra benchmark.
     if BENCHMARK_ISIN and benchmarks.get(BENCHMARK_ISIN):
         bench_history = benchmarks[BENCHMARK_ISIN]
         first_tx_ts = txs[0].ts if txs else None
         windows = []
-        # All-time: from the user's first transaction up to now.
+        # All-time
         if first_tx_ts:
             br = benchmark_return(bench_history, first_tx_ts, now)
             mwr_all_inc = mwr(txs, snapshot, bonus_as="income")
-            if br and mwr_all_inc is not None:
-                windows.append(("all-time", mwr_all_inc, br["annualized_return"]))
+            twr_all = twr(txs, snapshot_history, snapshot)
+            if br:
+                windows.append(("all-time", mwr_all_inc, twr_all, br["annualized_return"]))
         # YTD
         if ytd_value:
             br = benchmark_return(bench_history, ytd_start, now)
             mwr_y = mwr(txs, snapshot, bonus_as="income", start=ytd_start, start_value=ytd_value)
-            if br and mwr_y is not None:
-                windows.append((f"YTD ({now.year})", mwr_y, br["annualized_return"]))
+            twr_y = twr(txs, snapshot_history, snapshot, start=ytd_start)
+            if br:
+                windows.append((f"YTD ({now.year})", mwr_y, twr_y, br["annualized_return"]))
         # 12m
         if twelvem_value:
             br = benchmark_return(bench_history, twelvem_start, now)
             mwr_12 = mwr(txs, snapshot, bonus_as="income", start=twelvem_start, start_value=twelvem_value)
-            if br and mwr_12 is not None:
-                windows.append(("12 meses", mwr_12, br["annualized_return"]))
+            twr_12 = twr(txs, snapshot_history, snapshot, start=twelvem_start)
+            if br:
+                windows.append(("12 meses", mwr_12, twr_12, br["annualized_return"]))
 
         if windows:
             print(bar)
             print(f"  RENTABILIDAD VS BENCHMARK ({BENCHMARK_LABEL})")
             print(bar)
-            print(f"  {'Periodo':<14} {'Tu MWR (income)':>18}  {'Benchmark':>16}  {'Δ vs benchmark':>18}")
-            print(f"  {'-'*14} {'-'*18}  {'-'*16}  {'-'*18}")
-            for label, mwr_v, bench_v in windows:
-                delta_pp = (mwr_v - bench_v) * 100
-                marker = " ✓" if delta_pp > 0 else ("  " if delta_pp == 0 else "  ")
+            print(f"  {'Periodo':<14} {'Tu MWR':>10} {'Tu TWR':>10}  {'Benchmark':>11}  {'Δ MWR':>10}  {'Δ TWR':>10}")
+            print(f"  {'-'*14} {'-'*10} {'-'*10}  {'-'*11}  {'-'*10}  {'-'*10}")
+
+            def _fmt_pct_short(x):
+                return f"{x*100:>+8.2f} %" if x is not None else f"{'n/a':>10}"
+
+            def _fmt_delta(port, bench):
+                if port is None:
+                    return f"{'n/a':>10}"
+                d = (port - bench) * 100
+                sign = "✓" if d > 0 else (" " if d == 0 else " ")
+                return f"{d:>+7.2f} pp{sign}"
+
+            for label, mwr_v, twr_v, bench_v in windows:
                 print(
                     f"  {label:<14} "
-                    f"{mwr_v*100:>+15.2f} %  "
-                    f"{bench_v*100:>+13.2f} %  "
-                    f"{delta_pp:>+15.2f} pp{marker}"
+                    f"{_fmt_pct_short(mwr_v):>10} {_fmt_pct_short(twr_v):>10}  "
+                    f"{bench_v*100:>+8.2f} %  "
+                    f"{_fmt_delta(mwr_v, bench_v):>10}  {_fmt_delta(twr_v, bench_v):>10}"
                 )
+            print()
+            print(f"  ℹ TWR es el indicador honesto vs benchmark (sin sesgo de timing).")
+            print(f"    MWR alto + TWR similar = vas mejor que parece; MWR bajo + TWR alto = timing en contra.")
             print()
     elif BENCHMARK_ISIN:
         print(f"  ℹ Benchmark {BENCHMARK_ISIN} no disponible (sin histórico de precios).")
         print()
 
+    # ── RIESGO Y EFICIENCIA ────────────────────────────────────────────
+    bench_monthly = (
+        benchmark_monthly_returns(benchmarks[BENCHMARK_ISIN])
+        if BENCHMARK_ISIN and benchmarks.get(BENCHMARK_ISIN) else []
+    )
+    n_months = len(port_monthly_returns)
+    print(bar)
+    print("  RIESGO Y EFICIENCIA")
+    print(bar)
+    if n_months < 2:
+        print(f"  ℹ Se necesitan ≥2 meses de snapshots para estas métricas (tienes {n_months}).")
+        print(f"    Cada `make insights/sync/portfolio` añade un snapshot. Vuelve en unos meses.")
+    else:
+        # Always-on (need ≥2 months)
+        twr_all = twr(txs, snapshot_history, snapshot)
+        mwr_all = mwr_all_income
+        if twr_all is not None:
+            mwr_str = f"{mwr_all*100:+.2f} %" if mwr_all is not None else "n/a"
+            print(
+                f"  TWR all-time:               {fmt_pct(twr_all, anual=True):>14}"
+                f"   (vs MWR {mwr_str} — la diferencia es timing de aportaciones)"
+            )
+        mdd = max_drawdown(port_monthly_returns)
+        if mdd:
+            recov = (
+                f"recuperado en {mdd['days_to_recovery']} d"
+                if mdd["recovery_ts"] else "sin recuperar aún"
+            )
+            print(
+                f"  Max drawdown (TWR):         {-mdd['max_dd_pct']*100:>13.2f} %"
+                f"   ({mdd['peak_ts'].strftime('%Y-%m')} → {mdd['trough_ts'].strftime('%Y-%m')}, {recov})"
+            )
+
+        # Gated: ≥6 months for vol/Sharpe/TE/alpha (with caveat <12, none <6)
+        if n_months >= 6:
+            caveat = f"  ℹ N={n_months} meses (ruidoso, ideal ≥24)" if n_months < 24 else ""
+            vol = volatility_annualized(port_monthly_returns)
+            sharpe = sharpe_ratio(twr_all, vol, risk_free=0.02)
+            print()
+            print(f"  ── Volatilidad y eficiencia ──{caveat}")
+            if vol is not None:
+                print(f"  Volatilidad anual:          {vol*100:>13.2f} %")
+            if sharpe is not None:
+                print(f"  Sharpe (rf=2 %):            {sharpe:>13.2f}     (>1 bueno, >2 excelente)")
+
+            if bench_monthly:
+                te = tracking_error_annualized(port_monthly_returns, bench_monthly)
+                ab = alpha_beta(port_monthly_returns, bench_monthly, min_months=6)
+                # Gate alpha/beta on data quality. With <24 months or extreme
+                # beta (|β|>1.8), the OLS regression is dominated by 1-2
+                # outlier months and the numbers mislead more than inform.
+                ab_reliable = (
+                    ab is not None
+                    and ab["n_months"] >= 24
+                    and abs(ab["beta"]) <= 1.8
+                )
+                if te or ab_reliable:
+                    print()
+                    print(f"  ── Vs benchmark ({BENCHMARK_LABEL}) ──")
+                if te:
+                    print(f"  Tracking error anual:       {te['tracking_error']*100:>13.2f} %"
+                          f"   (cuánto te separas del benchmark)")
+                if ab_reliable:
+                    print(f"  Beta:                       {ab['beta']:>13.2f}     (1.0 = igual riesgo que el bench)")
+                    sign_word = "encima" if ab["alpha_annual"] >= 0 else "debajo"
+                    print(f"  Alpha anual:                {ab['alpha_annual']*100:>+12.2f} pp"
+                          f"   ({sign_word} de lo que tu beta sobre el bench predice)")
+                elif ab is not None:
+                    reason = []
+                    if ab["n_months"] < 24:
+                        reason.append(f"N={ab['n_months']}<24")
+                    if abs(ab["beta"]) > 1.8:
+                        reason.append(f"|β|={abs(ab['beta']):.1f}>1.8 (poco fiable con esta N)")
+                    print(f"  Alpha / Beta:               ocultos ({', '.join(reason)})")
+        else:
+            print()
+            print(f"  ℹ Volatilidad / Sharpe / Tracking error / Alpha:")
+            print(f"    requieren ≥6 meses de retornos mensuales (tienes {n_months}).")
+            print(f"    Saldrán automáticamente cuando haya datos suficientes.")
+    print()
+
     print(bar)
     print("  APORTACIONES MENSUALES (compras brutas, incluye saveback/regalos)")
     print(bar)
-    monthly = monthly_contributions(txs)
     cmp = contribution_vs_average(txs, now.year, now.month)
     if cmp:
         delta_str = "n/a" if cmp["delta_pct"] is None else f"{cmp['delta_pct']*100:+.1f}%"
@@ -212,6 +352,146 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
             print(f"    {y}-{m:02d}:  {fmt_eur(v):>16}")
     else:
         print("  (sin aportaciones registradas)")
+    print()
+
+    # ── RATIO DE AHORRO ────────────────────────────────────────────────
+    sr = savings_ratio(monthly, deposits_by_month, now=now, months_window=6)
+    if sr:
+        print(bar)
+        print(f"  RATIO DE AHORRO (últimos {sr['months_used']} meses)")
+        print(bar)
+        ratio_pct = sr["ratio"] * 100
+        cash_pct = 100 - ratio_pct
+        print(f"  Depositado neto:          {fmt_eur(sr['deposited']):>14}")
+        print(f"  Invertido (compras):      {fmt_eur(sr['invested']):>14}   ({ratio_pct:.1f} %)")
+        print(f"  Acumulado en cash:        {fmt_eur(sr['cash_pile']):>14}   ({cash_pct:.1f} %)")
+        if sr["cash_pile"] > 0 and ratio_pct < 70:
+            cost_op = sr["cash_pile"] * 0.07
+            print()
+            print(f"  ⚠ Estás reteniendo {cash_pct:.0f} % como cash. Coste de oportunidad")
+            print(f"    aprox. (a 7 % anual sobre el cash acumulado): {fmt_eur(cost_op)}/año.")
+        print()
+
+    print(bar)
+    print("  PROYECCIÓN DE PATRIMONIO (compuesto + cash savings)")
+    print(bar)
+
+    # Last completed month → contribution assumption.
+    prev_y, prev_m = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+    last_month_contrib = monthly.get((prev_y, prev_m), 0.0)
+
+    # Last 3 completed months → cash deposit (salary) assumption.
+    deposit_window: list[float] = []
+    y, m = now.year, now.month
+    for _ in range(3):
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+        deposit_window.append(deposits_by_month.get((y, m), 0.0))
+    avg_deposit_3m = sum(deposit_window) / 3 if deposit_window else 0.0
+
+    # All-time MWR → market growth assumption (fallback 6 % if unavailable).
+    if mwr_all_income is not None:
+        annual_return = mwr_all_income
+        return_source = f"tu MWR all-time ({annual_return*100:.2f} %)"
+    else:
+        annual_return = 0.06
+        return_source = "fallback 6 % (MWR no calculable aún)"
+
+    targets = _compute_targets(snapshot.total_eur)
+    proj = savings_projection(
+        snapshot.cash_eur,
+        snapshot.positions_value_eur,
+        last_month_contrib,
+        avg_deposit_3m,
+        annual_return,
+        targets,
+        now=now,
+    )
+
+    print(f"  Patrimonio actual:          {fmt_eur(proj['current']):>14}")
+    print(f"    · Cartera (compone):      {fmt_eur(proj['current_positions']):>14}")
+    print(f"    · Cash:                   {fmt_eur(proj['current_cash']):>14}")
+    print()
+    print(
+        f"  Aportación mensual:         {fmt_eur(proj['monthly_contribution']):>14}"
+        f"   ({prev_y}-{prev_m:02d}, último mes completo)"
+    )
+    print(
+        f"  Ingresos a TR (cash):       {fmt_eur(proj['monthly_deposit']):>14}"
+        f"   (media DEPOSITs últimos 3 m)"
+    )
+    leftover = proj["monthly_cash_flow"]
+    leftover_label = "→ se acumula como cash" if leftover >= 0 else "→ se invierte desde cash"
+    print(f"  Δ cash mensual:             {fmt_eur(leftover):>14}   {leftover_label}")
+    print(f"  Retorno anual asumido:      {return_source}")
+    # Alt scenario: invest 80 % of average deposits. Useful when the
+    # current contribution is well below that (i.e. cash is piling up).
+    alt_pct = 0.80
+    alt_contrib = avg_deposit_3m * alt_pct
+    show_alt = alt_contrib > last_month_contrib + 1.0 and avg_deposit_3m > 0
+    proj_alt = None
+    if show_alt:
+        proj_alt = savings_projection(
+            snapshot.cash_eur,
+            snapshot.positions_value_eur,
+            alt_contrib,
+            avg_deposit_3m,
+            annual_return,
+            targets,
+            now=now,
+        )
+
+    print()
+    if show_alt:
+        print(
+            f"  {'Objetivo':<12} {'Actual':>22}     "
+            f"{'Si inviertes ' + str(int(alt_pct*100)) + ' % (' + fmt_eur(alt_contrib).strip() + '/m)':>34}"
+        )
+        print(f"  {'-'*12} {'-'*22}     {'-'*34}")
+    else:
+        print(f"  {'Objetivo':<12} {'Falta':>14}  {'ETA':>26}")
+        print(f"  {'-'*12} {'-'*14}  {'-'*26}")
+
+    def _fmt_eta(entry):
+        if entry["status"] == "reached":
+            return "ya alcanzado"
+        if entry["status"] == "non_reachable":
+            return ">100 a"
+        months = entry["months"]
+        eta = entry["eta"]
+        if months < 12:
+            when = f"~{months:.1f} m"
+        else:
+            when = f"~{months/12:.1f} a ({months:.0f} m)"
+        eta_s = eta.strftime("%Y-%m") if eta else "?"
+        return f"{when} → {eta_s}"
+
+    for i, entry in enumerate(proj["targets"]):
+        target_s = fmt_eur(entry["target"])
+        actual_eta = _fmt_eta(entry)
+        if show_alt:
+            alt_entry = proj_alt["targets"][i]
+            alt_eta = _fmt_eta(alt_entry)
+            if entry["months"] is not None and alt_entry["months"] is not None:
+                diff_m = entry["months"] - alt_entry["months"]
+                diff_str = f"  (-{diff_m:.0f} m)" if diff_m > 0 else ""
+            else:
+                diff_str = ""
+            print(f"  {target_s:<12} {actual_eta:>22}     {alt_eta + diff_str:>34}")
+        else:
+            print(f"  {target_s:<12} {fmt_eur(entry['remaining']):>14}  {actual_eta:>26}")
+    print()
+    if show_alt:
+        cash_pct_now = (1 - last_month_contrib / avg_deposit_3m) * 100 if avg_deposit_3m > 0 else 0
+        print(f"  ℹ Ahora inviertes {last_month_contrib/avg_deposit_3m*100:.0f} % de tus ingresos a TR;")
+        print(f"    si subieras al 80 %, las ETAs lejanas se acortan visiblemente. El cash extra")
+        print(f"    de {fmt_eur(avg_deposit_3m - last_month_contrib).strip()}/m vale más invertido que parado.")
+    else:
+        print("  ℹ Modelo: cartera compone al retorno anual; cash crece linealmente")
+        print("    con (ingresos − aportación). Asume que el ritmo del último mes")
+        print("    de compras y la media de 3 m de transferencias se mantienen.")
     print()
 
     print(bar)
