@@ -23,9 +23,9 @@ The rest of the lines are context / sub-readings to help you understand where ea
 ```
 PATRIMONIO ACTUAL
   Cartera (ETFs/acciones):       9.145,50 €
-  Cripto:                          278,28 €
+  Cripto:                            0,00 €
   Cash:                         13.127,46 €
-  TOTAL:                        22.551,24 €
+  TOTAL:                        22.272,96 €
 ```
 
 - **Cartera (ETFs/acciones)** = sum of `netValue` of positions that are **not** in `crypto_isins` of the config.
@@ -150,12 +150,10 @@ Table with the individual MWR of each position you currently hold, and how many 
 ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN (MWR per-ISIN, modo income)
   Activo                          valor   peso    MWR pos.       aporta
   ----------------------- ------------ ------ ----------- -----------
-  Core S&P 500 USD (Acc)    4.205,81 €  44.6%   +28.50 %     +12.71 pp
-  S&P 500 Information Tech  1.366,66 €  14.5%   +35.20 %      +5.10 pp
-  Core MSCI Europe EUR        796,82 €   8.5%   +12.40 %      +1.05 pp
-  Solana                      278,21 €   3.0%   -42.10 %      -1.24 pp
-  ...
-  TOTAL contribuciones                                        +XX.XX pp
+  Core S&P 500 USD (Acc)    4.205,81 €  46.0%   +28.50 %     +13.11 pp
+  Core MSCI World USD       2.760,40 €  30.2%   +18.20 %      +5.50 pp
+  EUR Govt Bond UCITS ETF   2.179,29 €  23.8%    +3.10 %      +0.74 pp
+  TOTAL contribuciones                                        +19.35 pp
 ```
 
 **How to read it:**
@@ -165,7 +163,7 @@ ATRIBUCIÓN DE RENDIMIENTO POR POSICIÓN (MWR per-ISIN, modo income)
 
 **Important:** The sum of contributions **doesn't match** your all-time MWR from the historical block. Reason: only live positions count here; the all-time MWR also includes flows from positions you already sold (NVIDIA, Tesla, Apple, etc.).
 
-**When it helps:** see at a glance which positions drive the return and which drag. If a small position has catastrophic MWR (Solana -42%), it probably doesn't deserve more weight. If a large one is slow but steady (Europe +12%), you know it contributes little but diversifies.
+**When it helps:** see at a glance which positions drive the return and which drag. If a small position has catastrophic MWR (e.g. -40%), it probably doesn't deserve more weight. If a large one is slow but steady (e.g. a bond ETF +3%), you know it contributes little but diversifies.
 
 ---
 
@@ -218,9 +216,9 @@ If you don't define `concentration_limits` in config, all assets are compared ag
 
 ```
 CONCENTRACIÓN (% sobre posiciones, alerta a >35%)
-  Core S&P 500 USD (Acc)        44.63%  ███████████  límite  35% (global), margen  −9.6 pp
-  Core MSCI EM IMI USD (Acc)    15.88%  ████         límite  35% (global), margen +19.1 pp
-  ...
+  Core S&P 500 USD (Acc)        46.00%  ███████████  límite  35% (global), margen −11.0 pp
+  Core MSCI World USD (Acc)     30.20%  ████████     límite  35% (global), margen  +4.8 pp
+  EUR Govt Bond UCITS ETF       23.80%  ██████       límite  35% (global), margen +11.2 pp
   ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
@@ -231,47 +229,41 @@ If you define `concentration_limits` in `config.yaml`, each ISIN is evaluated ag
 ```yaml
 concentration_limits:
   IE00B5BMR087: 0.50    # SP500 — core, high tolerance
-  XF000SOL0012: 0.08    # Solana — crypto, low tolerance
+  IE00B3F81R35: 0.20    # Bond ETF — stricter than the global threshold
 ```
 
 Output:
 
 ```
 CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
-  Core S&P 500 USD (Acc)        44.63%  ███████████  límite  50%, margen  +5.4 pp
-  S&P 500 Information Tech USD  14.50%  ████         límite  20%, margen  +5.5 pp
-  Solana                         2.95%  █            límite   8%, margen  +5.1 pp
-  MSCI India USD (Acc)           2.67%  █            límite  35% (global), margen +32.3 pp
-  ...
-  ✓ Todas las posiciones dentro de su límite.
+  Core S&P 500 USD (Acc)        46.00%  ███████████  límite  50%, margen  +4.0 pp
+  Core MSCI World USD (Acc)     30.20%  ████████     límite  35% (global), margen  +4.8 pp
+  EUR Govt Bond UCITS ETF       23.80%  ██████       límite  20%, EXCEDIDO en  3.8 pp
+  ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
 ### "I only care about X assets" mode
 
-Typical case: you only want an alert for Solana (or any crypto), the rest don't matter. Set `concentration_threshold: null` and only the ISINs with an entry in `concentration_limits` will show an alert line:
+Typical case: you only want an alert for one specific asset (e.g. a bond ETF or a crypto), the rest don't matter. Set `concentration_threshold: null` and only the ISINs with an entry in `concentration_limits` will show an alert line:
 
 ```yaml
 concentration_threshold: null
 concentration_limits:
-  XF000SOL0012: 0.08
+  IE00B3F81R35: 0.20
 ```
 
 Output:
 
 ```
 CONCENTRACIÓN (% sobre posiciones, alerta solo en activos con límite explícito)
-  Core S&P 500 USD (Acc)        44.63%  ██████████████████
-  Core MSCI EM IMI USD (Acc)    15.88%  ██████
-  S&P 500 Information Tech USD  14.50%  ██████
-  MSCI World Small Cap USD (Ac  10.91%  ████
-  Core MSCI Europe EUR (Acc)     8.46%  ███
-  Solana                         2.95%  █                   límite   8%, margen  +5.1 pp
-  MSCI India USD (Acc)           2.67%  █
+  Core S&P 500 USD (Acc)        46.00%  ██████████████████
+  Core MSCI World USD (Acc)     30.20%  ████████████
+  EUR Govt Bond UCITS ETF       23.80%  █████████           límite  20%, EXCEDIDO en  3.8 pp
 
-  ✓ Todas las posiciones dentro de su límite.
+  ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
-Only Solana shows a limit line. The rest go "clean" with no possible alerts.
+Only the bond ETF shows a limit line. The rest go "clean" with no possible alerts.
 
 ### When "(global)" is shown
 
@@ -294,9 +286,8 @@ Only appears if you have `asset_currencies` defined in `config.yaml`. Shows how 
 
 ```
 EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
-  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   1 pos.
-  USD         8.347,12 €  ( 37.0%)  █████████████            5 pos.
-  CRYPTO        278,28 €  (  1.2%)  ▌                        1 pos.
+  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   2 pos.
+  USD         8.625,40 €  ( 38.3%)  █████████████            2 pos.
 ```
 
 When it helps: if most of your investments are USD-denominated ETFs but your cash stays in EUR, you realize that your **effective USD exposure** is lower than it seems — uninvested cash is weighing towards EUR.

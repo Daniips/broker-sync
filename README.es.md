@@ -191,7 +191,7 @@ ignore_events:
   income:
     title_contains:
       - "tu nombre apellido"   # autotransferencias entrantes
-      - "imagin"                # ingresos de imagin
+      - "<your-bank-name>"      # ingresos de tu otra cuenta
     subtitle_contains: []
   expenses:
     title_contains: []

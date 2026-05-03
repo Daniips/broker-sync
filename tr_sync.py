@@ -374,9 +374,9 @@ def list_features():
     print(f"Active broker: TR ({len(BROKER_CAPABILITIES)} capabilities)")
     print(f"Capabilities: {', '.join(sorted(BROKER_CAPABILITIES))}")
     print()
-    print("To enable/disable features, edit config.yaml > features:")
-    print("  features:")
-    print("    insights: false   # e.g. turn off the insights command")
+    print("To toggle features without editing the YAML, run:")
+    print("  make config-features                 # interactive checkbox")
+    print("  python tr_sync.py config set features.<name> false")
     print()
 
 # ── Renta: report sections to generate ────────────────────────────────────

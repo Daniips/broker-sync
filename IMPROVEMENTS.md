@@ -13,7 +13,7 @@ Chronologically (most recent on top):
 - **Benchmark comparison** — `benchmark_isin` in config. `make insights` compares MWR (income) against the benchmark's annualized return over all-time / YTD / 12m, with Δ in pp and `✓` if you beat the index.
 - **Currency exposure** — `asset_currencies: {ISIN: currency}` in config + "CURRENCY EXPOSURE" block grouping total net worth by currency.
 - **MWR sanity check (via `make mwr-flows`)** — exports flows in TSV to verify with native XIRR in Sheets/Excel. **Validated**: my home-grown `xirr()` converges to the same number as `=TIR.NO.PER` (0.02pp diff, rounding).
-- **Solana in backfill** — exchange `BHS` captured via `compactPortfolio.exchangeIds`. Fallback `instrument_details(isin)` to discover non-hardcoded exchanges in future crypto ISINs.
+- **Crypto in backfill** — non-standard exchanges (e.g. `BHS`) captured via `compactPortfolio.exchangeIds`. Fallback `instrument_details(isin)` to discover non-hardcoded exchanges in future crypto ISINs.
 - **Determinism in backfill** — timestamps normalized to `T12:00:00`. Re-running is idempotent (no duplicates).
 - **Per-asset concentration limits** — `concentration_limits: {ISIN: float}` + support for `concentration_threshold: null` to turn off the global and only alert what's configured.
 - **TR cache** — `core/cache.py` with TTL=5min. Chains commands without re-fetch. `--refresh` to invalidate. Cache extended to v2 to also support benchmark history.
@@ -74,7 +74,7 @@ Given the `concentration_limits` and the current portfolio, compute what to buy/
 
 ```
 REBALANCE SUGGESTIONS
-  Solana            current 9.1% > limit 8.0%
+  Asset C           current 9.1% > limit 8.0%
     → sell ~30 € to come back to 8%
 
   (To define finer target weights, add `target_weights` in config.)
@@ -159,7 +159,7 @@ Positions with negative unrealized gains you could sell to realize the loss and 
 
 ```
 TAX LOSS HARVESTING (orientative)
-  Solana           unrealized loss: −127.82 €
+  Asset C          unrealized loss: −127.82 €
     → Selling now offsets up to −127.82 € of gains.
     If you closed +200 € in 2026, you could reduce taxable base 64% × 127.82 = 81.80 €.
 ```

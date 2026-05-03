@@ -89,33 +89,25 @@ status_labels:
 # How the assets appear in TR (key) and how you want them to appear in the
 # "Dinero invertido" tab (value).
 asset_name_map:
-  "MSCI India USD (Acc)": "MSCI India"
-  "Solana": "Solana"
-  "Core MSCI Europe EUR (Acc)": "MSCI EUR"
-  "Core MSCI EM IMI USD (Acc)": "MSCI EM IMI"
   "Core S&P 500 USD (Acc)": "SP 500"
-  "MSCI World Small Cap USD (Acc)": "SMALL CAPS"
+  "Core MSCI World USD (Acc)": "World"
+  "EUR Govt Bond UCITS ETF": "Bonds"
 
 # ── Portfolio: "Calculo ganancias" tab ────────────────────────────────────
 # Ordered list of ISINs with their label. The vertical order must match
 # the rows of portfolio_value_range (one entry per cell).
 portfolio_cell_map:
   - { isin: "IE00B5BMR087", label: "sp500" }
-  - { isin: "IE00B3WJKG14", label: "sp500 tech" }
-  - { isin: "IE00BKM4GZ66", label: "em imi" }
-  - { isin: "IE00BF4RFH31", label: "small caps" }
-  - { isin: "IE00B4K48X80", label: "msci eur" }
-  - { isin: "IE00BZCQB185", label: "india" }
-  - { isin: "XF000SOL0012", label: "solana" }
+  - { isin: "IE00B4L5Y983", label: "world" }
+  - { isin: "IE00B3F81R35", label: "bonds" }
 
 # Range in the portfolio tab where the netValues are written (one value per row).
 # Must have as many cells as entries in portfolio_cell_map.
-portfolio_value_range: "C2:C8"
+portfolio_value_range: "C2:C4"
 
 # ── Crypto ────────────────────────────────────────────────────────────────
 # ISINs the script should treat as crypto (informative Modelo 721).
-crypto_isins:
-  - "XF000SOL0012"
+crypto_isins: []
 
 # ── Events to ignore (not synced to Expenses/Income) ──────────────────────
 # Useful when you already manage something manually in the Sheet (e.g. the
@@ -125,8 +117,8 @@ crypto_isins:
 ignore_events:
   income:
     title_contains: []
-      # - "imagin"            # ignore income whose title contains 'imagin'
-      # - "your name surname" # ignore self-transfers from another account
+      # - "<your-bank-name>"   # ignore income whose title contains your other-bank's name
+      # - "your name surname"  # ignore self-transfers from another account
     subtitle_contains: []
   expenses:
     title_contains: []
@@ -224,10 +216,9 @@ renta_classification:
 #       cash_targets:
 #         min_eur: 10000
 #         max_eur:
-#           "2025-01-01": 15000
-#           "2026-07-01": 17500
-#           "2027-01-01": 20000
-#           "2027-07-01": 22500
+#           "2025-01-01": 5000
+#           "2026-01-01": 7500
+#           "2027-01-01": 10000
 
 # ── Misc ──────────────────────────────────────────────────────────────────
 # Buffer of days before the start of the current month when downloading events

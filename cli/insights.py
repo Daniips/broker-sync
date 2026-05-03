@@ -516,8 +516,9 @@ def sync_insights(verbose: bool = False, *, refresh: bool = False):
         if expense_is_tr_only:
             print()
             print(f"  ℹ Estimated only with spending that flows through TR (card, bizum, outgoing transfers).")
-            print(f"    If you spend from another account, set `monthly_expenses_eur: <€>` in")
-            print(f"    config.yaml for a realistic calculation.")
+            print(f"    If you spend from another account, declare your real monthly expense:")
+            print(f"      python tr_sync.py config set monthly_expenses_eur <€>")
+            print(f"    (or run `make reconfigure` to use the wizard)")
         print()
 
     # ── CASH TARGET ────────────────────────────────────────────────────

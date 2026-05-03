@@ -37,7 +37,7 @@ For each **sale** made in the year:
 
 Supports:
 - ✅ Individual stocks (Apple, Tesla, Deutsche Telekom, etc.)
-- ✅ ETFs (S&P 500, MSCI EM IMI, Digitalisation, etc.)
+- ✅ ETFs (broad equity, sector, regional, etc.)
 - ✅ **TR gifts** (`ETF-Geschenk`, `Verlosung`/lottery) — the tax cost is the market value at receipt.
 - ✅ **Bonds** sold before maturity.
 

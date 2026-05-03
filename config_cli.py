@@ -352,40 +352,75 @@ def _ask_personal_blocks(cfg: dict, existing: dict) -> None:
             cfg["renta"] = {key: (key in selected) for key, _ in all_sections}
 
 
-def cmd_init(args):
-    """Interactive wizard. Asks step by step and writes config.yaml.
-
-    If config.yaml already exists, its current values are used as defaults
-    so the wizard doubles as a reconfigure tool. Fields the wizard does
-    not ask about (e.g. gift_cost_overrides, init_sheet_headers,
-    subtitle_translations) are preserved from the existing file.
+def _apply_sensible_defaults(cfg: dict) -> None:
+    """Fill in sensible defaults for every non-essential field. Used by the
+    Quick path so the user only has to answer the truly required questions.
+    Existing values are preserved (setdefault behaviour).
     """
-    print("\n🛠  tr-sync configuration wizard\n")
+    cfg.setdefault("features", {
+        "expenses": True,
+        "income": True,
+        "investments": True,
+        "portfolio": True,
+    })
+    sheets = cfg.setdefault("sheets", {})
+    sheets.setdefault("expenses", "Gastos")
+    sheets.setdefault("expenses_layout", "monthly_columns")
+    sheets.setdefault("income", "Ingresos")
+    sheets.setdefault("income_layout", "monthly_columns")
+    sheets.setdefault("investments_year_format", "Dinero invertido {year}")
+    sheets.setdefault("portfolio", "Calculo ganancias")
+    sheets.setdefault("status", "Estado sync")
+    sheets.setdefault("sync_state", "_sync_state")
+    cfg.setdefault("summary_markers", {
+        "expenses": ["gastos innecesarios", "gastos totales", "extraordinarios"],
+        "income": ["ingresos totales", "ingresos", "totales"],
+    })
+    cfg.setdefault("timezone", "Europe/Madrid")
+    cfg.setdefault("default_buffer_days", 7)
 
-    existing: dict = _load_yaml(CONFIG_PATH) if CONFIG_PATH.exists() else {}
-    if existing:
-        print(f"📄 Existing {CONFIG_PATH.name} detected — current values "
-              f"will be used as defaults.")
-        if not questionary.confirm(
-            "Continue (the file will be rewritten when the wizard finishes)?",
-            default=True,
-        ).ask():
-            print("Aborted.")
-            return 1
-        cfg: dict = dict(existing)  # preserve fields the wizard does not ask about
+
+def _ask_portfolio_essentials(cfg: dict, existing: dict) -> None:
+    """Quick-path portfolio prompt: ISIN + label list, range derived
+    automatically from the count. Skipped if user opts out.
+    """
+    existing_pcm = existing.get("portfolio_cell_map") or []
+    if existing_pcm and questionary.confirm(
+        f"Keep the existing portfolio of {len(existing_pcm)} assets?",
+        default=True,
+    ).ask():
+        cfg["portfolio_cell_map"] = list(existing_pcm)
     else:
-        cfg = {}
+        print("\n  Enter your portfolio (ISIN + short label). Empty ISIN to finish.")
+        cfg["portfolio_cell_map"] = []
+        i = 0
+        while True:
+            i += 1
+            isin = questionary.text(f"  Asset {i} — ISIN:").ask()
+            if not isin or not isin.strip():
+                break
+            label = questionary.text(
+                f"  Asset {i} — short label:",
+                default=isin.strip(),
+            ).ask() or isin
+            cfg["portfolio_cell_map"].append({
+                "isin": isin.strip(),
+                "label": label.strip(),
+            })
 
-    # ── Sheet ID ──
-    sheet_id = questionary.text(
-        "ID of your Google Sheet (from the URL: docs.google.com/spreadsheets/d/<THIS_ID>/edit):",
-        default=existing.get("sheet_id", ""),
-        validate=lambda v: True if v and not v.startswith("REEMPLAZA") and not v.startswith("REPLACE") else "Paste the actual ID",
-    ).ask()
-    if sheet_id is None:
-        return 1
-    cfg["sheet_id"] = sheet_id.strip()
+    # Derive the portfolio_value_range from the count if not explicitly set.
+    n = len(cfg["portfolio_cell_map"])
+    if n > 0:
+        cfg["portfolio_value_range"] = existing.get(
+            "portfolio_value_range",
+            f"C2:C{n + 1}",
+        )
 
+
+def _ask_full_wizard(cfg: dict, existing: dict) -> None:
+    """Full-path wizard: every field is asked individually. Used when the
+    user wants to customize beyond the sensible defaults.
+    """
     # ── Features (toggles) ──
     existing_features = existing.get("features") or {}
     features = questionary.checkbox(
@@ -398,7 +433,7 @@ def cmd_init(args):
         ],
     ).ask()
     if features is None:
-        return 1
+        return
     cfg["features"] = {k: (k in features) for k in ("expenses", "income", "investments", "portfolio")}
 
     # ── Tabs ──
@@ -524,7 +559,7 @@ def cmd_init(args):
             cfg["asset_name_map"] = dict(existing_amap)
         else:
             print("\nMapping of TR names to your Investments tab.")
-            print("E.g. 'Core S&P 500 USD (Acc)' → 'SP 500'. Press Enter on an empty TR name to finish.")
+            print("E.g. 'iShares Core MSCI World UCITS ETF' → 'World'. Press Enter on an empty TR name to finish.")
             amap: dict = {}
             while True:
                 tr_name = questionary.text("  Name TR uses (empty to finish):").ask()
@@ -560,6 +595,74 @@ def cmd_init(args):
         validate=lambda v: v.isdigit() and int(v) >= 0 or "Integer >= 0",
     ).ask() or "7")
 
+
+def cmd_init(args):
+    """Interactive wizard. Two paths:
+
+      - **Quick** (default): asks ONLY the essentials (Sheet ID, optional
+        portfolio) and fills in sensible defaults for everything else. ~3
+        prompts and you're done.
+      - **Full**: walks every field one by one, including advanced blocks
+        (concentration alerts, benchmark, cash targets, IRPF report,
+        ignore patterns, …).
+
+    If `config.yaml` already exists its current values are used as
+    defaults; the wizard doubles as a reconfigure tool. Fields the
+    wizard does not ask about (`gift_cost_overrides`,
+    `init_sheet_headers`, `subtitle_translations`, …) are preserved.
+    """
+    print("\n🛠  tr-sync configuration wizard\n")
+
+    existing: dict = _load_yaml(CONFIG_PATH) if CONFIG_PATH.exists() else {}
+    if existing:
+        print(f"📄 Existing {CONFIG_PATH.name} detected — current values "
+              f"will be used as defaults.")
+        if not questionary.confirm(
+            "Continue (the file will be rewritten when the wizard finishes)?",
+            default=True,
+        ).ask():
+            print("Aborted.")
+            return 1
+        cfg: dict = dict(existing)  # preserve fields the wizard does not ask about
+    else:
+        cfg = {}
+
+    # ── Essential: Sheet ID ──
+    sheet_id = questionary.text(
+        "Google Sheet ID (from URL: docs.google.com/spreadsheets/d/<THIS_ID>/edit):",
+        default=existing.get("sheet_id", ""),
+        validate=lambda v: True if v and not v.startswith("REEMPLAZA") and not v.startswith("REPLACE") else "Paste the actual ID",
+    ).ask()
+    if sheet_id is None:
+        return 1
+    cfg["sheet_id"] = sheet_id.strip()
+
+    # ── Branch: Quick or Full ──
+    mode = questionary.select(
+        "Setup mode:",
+        choices=[
+            questionary.Choice(
+                "Quick — sensible defaults, just a couple of questions",
+                value="quick",
+            ),
+            questionary.Choice(
+                "Full — customize every field (advanced)",
+                value="full",
+            ),
+        ],
+        default="quick",
+    ).ask() or "quick"
+
+    if mode == "quick":
+        _apply_sensible_defaults(cfg)
+        if questionary.confirm(
+            "Track a portfolio of ISINs (recommended)?",
+            default=bool(existing.get("portfolio_cell_map", True)),
+        ).ask():
+            _ask_portfolio_essentials(cfg, existing)
+    else:
+        _ask_full_wizard(cfg, existing)
+
     # ── Confirmation ──
     print("\n📄 Config summary:")
     print(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
@@ -568,7 +671,9 @@ def cmd_init(args):
         return 1
 
     _save_yaml(CONFIG_PATH, cfg, header=_HEADER)
-    print(f"\n✅ {CONFIG_PATH.name} saved. Run `make doctor` to verify.")
+    print(f"\n✅ {CONFIG_PATH.name} saved.")
+    print("   Run `make doctor` to verify the setup is ready.")
+    print("   Run `make reconfigure` later to tune any setting.")
     return 0
 
 

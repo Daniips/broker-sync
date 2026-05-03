@@ -259,7 +259,7 @@ class ConcentrationTests(unittest.TestCase):
     def test_per_asset_limits_within(self):
         positions = (
             Position(isin="A", title="SP500", net_value_eur=4500, broker="t"),
-            Position(isin="B", title="Solana", net_value_eur=300, broker="t"),
+            Position(isin="B", title="Asset B", net_value_eur=300, broker="t"),
         )
         s = PortfolioSnapshot(ts=t(2026, 4, 26), cash_eur=0, positions=positions)
         c = concentration(s, limits={"A": 0.50, "B": 0.08})

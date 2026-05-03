@@ -54,12 +54,9 @@ Investment summary (savings plan + saveback + manual purchases) by month and by 
 | A (Activo) | B | C | … (one month per column) |
 |---|---|---|---|
 | | enero 2026 | febrero 2026 | … |
-| SP 500 | 240 | 240 | |
-| MSCI EM IMI | 220 | 220 | |
-| MSCI EUR | 80 | 80 | |
-| SMALL CAPS | 160 | 160 | |
-| MSCI India | 50 | 50 | |
-| Solana | 50 | 50 | |
+| SP 500 | 300 | 300 | |
+| World | 150 | 150 | |
+| Bonds | 50 | 50 | |
 | SAVEBACK | 15,32 | | |
 
 - **Row 1**: header with the format `<month> <year>` (the same months as in Gastos).
@@ -80,19 +77,15 @@ Snapshot of the current value of each portfolio asset. The script **only writes*
 | A (Asset) | B (something optional) | C (current value €) |
 |---|---|---|
 | sp500 | … | 1234,56 |
-| sp500 tech | … | 567,89 |
-| em imi | … | 890,12 |
-| small caps | … | 345,67 |
-| msci eur | … | 234,56 |
-| india | … | 123,45 |
-| solana | … | 67,89 |
+| world | … | 567,89 |
+| bonds | … | 234,56 |
 
 - The **exact range** and the ISINs that get written are configured in `config.yaml`:
   ```yaml
-  portfolio_value_range: "C2:C8"   # as many rows as entries in portfolio_cell_map
+  portfolio_value_range: "C2:C4"   # as many rows as entries in portfolio_cell_map
   portfolio_cell_map:
     - { isin: "IE00B5BMR087", label: "sp500" }
-    - { isin: "IE00B3WJKG14", label: "sp500 tech" }
+    - { isin: "IE00B4L5Y983", label: "world" }
     - ...
   ```
 - The script doesn't touch the headers or columns A/B; it only writes the netValue in the configured range.

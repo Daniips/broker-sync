@@ -90,14 +90,17 @@ class AggregateInvestmentsTests(unittest.TestCase):
         self.assertEqual(tr_sync.aggregate_investments(events), {})
 
     def test_manual_buy_is_counted(self):
+        # Title chosen so it's NOT in the user's asset_name_map: aggregator
+        # then falls back to using the raw title as the bucket key, which is
+        # what we assert below.
         events = [raw_event(
             id="buy",
             eventType="TRADING_TRADE_EXECUTED",
-            title="Core MSCI EM IMI USD (Acc)",
+            title="Generic World ETF (Acc)",
             amount={"value": -200.0},
         )]
         totals = tr_sync.aggregate_investments(events)
-        self.assertEqual(totals[("MSCI EM IMI", 2026, 4)], 200.0)
+        self.assertEqual(totals[("Generic World ETF (Acc)", 2026, 4)], 200.0)
 
     def test_manual_sell_is_ignored(self):
         events = [raw_event(
@@ -594,13 +597,13 @@ class IgnoreEventsTests(unittest.TestCase):
         self.assertTrue(tr_sync._matches_ignore(raw, cfg))
 
     def test_matches_subtitle(self):
-        raw = {"title": "X", "subtitle": "transferencia imagin"}
-        cfg = {"title_contains": [], "subtitle_contains": ["imagin"]}
+        raw = {"title": "X", "subtitle": "transferencia another-bank"}
+        cfg = {"title_contains": [], "subtitle_contains": ["another-bank"]}
         self.assertTrue(tr_sync._matches_ignore(raw, cfg))
 
     def test_no_match_returns_false(self):
         raw = {"title": "Mercadona", "subtitle": ""}
-        cfg = {"title_contains": ["imagin"], "subtitle_contains": []}
+        cfg = {"title_contains": ["another-bank"], "subtitle_contains": []}
         self.assertFalse(tr_sync._matches_ignore(raw, cfg))
 
     def test_empty_config_does_not_match(self):

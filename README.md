@@ -64,7 +64,7 @@ make doctor          # health check before first sync
 make verify          # portfolio dry-run to confirm OAuth
 ```
 
-> If you prefer to hand-edit the YAML: `cp config.example.yaml config.yaml` and fill following [CONFIG.md](CONFIG.md) (Spanish).
+> The wizard above is the recommended path — it generates `config.yaml` for you. If for some reason you prefer to hand-edit YAML, copy `config.example.yaml` to `config.yaml` and follow [CONFIG.md](CONFIG.md).
 
 If `make verify` shows your asset netValues without writing anything, you're good to go.
 
@@ -72,9 +72,20 @@ If `make verify` shows your asset netValues without writing anything, you're goo
 
 ## Configuration
 
-Two relevant files:
+You should never need to open `config.yaml` by hand. Everything is managed via CLI:
 
-- **`config.yaml`** — your personal config (gitignored). The only file you **must edit**. Full reference of every field in [CONFIG.md](CONFIG.md) (Spanish).
+| Need to … | Command |
+|---|---|
+| Create / reconfigure your config | `make config-init` (or `make reconfigure`) |
+| Toggle a feature | `make config-features` |
+| Change any single field | `python tr_sync.py config set KEY VALUE` |
+| Add an ISIN to the portfolio | `python tr_sync.py config add-asset ISIN LABEL` |
+| Add an ignore-pattern | `python tr_sync.py config add-ignore SECTION TXT` |
+| Inspect current config | `make config-show` |
+| Validate config | `make config-validate` |
+
+Files:
+- **`config.yaml`** — your personal config (gitignored). Generated and managed by the CLI commands above. Full field reference in [CONFIG.md](CONFIG.md) for context, but you don't need to read it to set things up.
 - **`Makefile.local`** — optional, gitignored. For environment-specific variables (e.g. `REPO := your_user/your_repo` for GitHub Actions targets).
 
 ### Sheet structure
@@ -176,8 +187,8 @@ A `config` subcommand lets you manage `config.yaml` entirely from the terminal, 
 
 ### Notes
 
-- The `config init` wizard asks sheet_id, features, layouts, tab names, portfolio (ISINs+labels), `asset_name_map`, crypto, timezone, etc. Takes <2 minutes.
-- `set` / `add-*` regenerate the YAML on save and **lose comments** from the file. If you want them preserved, edit by hand.
+- The `config init` wizard has two paths: **Quick** (asks Sheet ID + portfolio, fills the rest with sensible defaults) and **Full** (walks every field including advanced blocks like cash targets, IRPF, ignore patterns…). Takes <1 minute on Quick.
+- `set` / `add-*` regenerate the YAML on save and lose any comments you may have added to the file by hand.
 - All `config` subcommands work **without an existing `config.yaml`** or `pytr`/`gspread` loaded — ideal for first-time setup.
 
 ---
@@ -186,7 +197,16 @@ A `config` subcommand lets you manage `config.yaml` entirely from the terminal, 
 
 Got incoming or outgoing transfers you **already manage manually** in your Sheet and don't want the sync to duplicate? E.g. salary received in another account and moved to TR, or personal refunds between your accounts.
 
-In `config.yaml`:
+Add an ignore pattern from the terminal:
+
+```bash
+python tr_sync.py config add-ignore income "your name"
+python tr_sync.py config add-ignore income "your other bank"
+```
+
+(Or run `make reconfigure` to use the wizard — it has a dedicated "Ignore patterns" section.)
+
+The resulting `config.yaml` looks like:
 
 ```yaml
 ignore_events:

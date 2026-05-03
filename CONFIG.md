@@ -125,12 +125,9 @@ Mapping from the name TR uses for each asset (key) to the name you have in the "
 
 ```yaml
 asset_name_map:
-  "MSCI India USD (Acc)": "MSCI India"
-  "Solana": "Solana"
-  "Core MSCI Europe EUR (Acc)": "MSCI EUR"
-  "Core MSCI EM IMI USD (Acc)": "MSCI EM IMI"
   "Core S&P 500 USD (Acc)": "SP 500"
-  "MSCI World Small Cap USD (Acc)": "SMALL CAPS"
+  "Core MSCI World USD (Acc)": "World"
+  "EUR Govt Bond UCITS ETF": "Bonds"
 ```
 
 To discover the exact name TR uses, run:
@@ -147,12 +144,8 @@ Ordered list of the ISINs whose current value you want written to the "Calculo g
 ```yaml
 portfolio_cell_map:
   - { isin: "IE00B5BMR087", label: "sp500" }
-  - { isin: "IE00B3WJKG14", label: "sp500 tech" }
-  - { isin: "IE00BKM4GZ66", label: "em imi" }
-  - { isin: "IE00BF4RFH31", label: "small caps" }
-  - { isin: "IE00B4K48X80", label: "msci eur" }
-  - { isin: "IE00BZCQB185", label: "india" }
-  - { isin: "XF000SOL0012", label: "solana" }
+  - { isin: "IE00B4L5Y983", label: "world" }
+  - { isin: "IE00B3F81R35", label: "bonds" }
 ```
 
 The `label` is only used for the console log; what matters is the ISIN and the order.
@@ -164,7 +157,7 @@ The `label` is only used for the console log; what matters is the ISIN and the o
 A1 range where the script writes the current `netValue`s. Must be a single column with as many cells as entries in `portfolio_cell_map`.
 
 ```yaml
-portfolio_value_range: "C2:C8"
+portfolio_value_range: "C2:C4"
 ```
 
 ---
@@ -174,8 +167,7 @@ portfolio_value_range: "C2:C8"
 ISINs that the script treats as cryptocurrencies for the "Posición cripto" section of the IRPF report (informative for Modelo 721).
 
 ```yaml
-crypto_isins:
-  - "XF000SOL0012"
+crypto_isins: []
 ```
 
 ---
@@ -202,7 +194,7 @@ ignore_events:
   income:
     title_contains:
       - "your name"           # incoming auto-transfers
-      - "imagin"
+      - "<your-bank-name>"    # ignore income whose title contains your other-bank's name
     subtitle_contains: []
   expenses:
     title_contains: []
@@ -325,12 +317,8 @@ Dict `{ISIN: float}` with the individual cap of each asset in the portfolio. Ove
 ```yaml
 concentration_limits:
   IE00B5BMR087: 0.50    # Core SP500: 50% (it's core, high tolerance)
-  IE00B3WJKG14: 0.20    # SP500 Tech: 20%
-  IE00BKM4GZ66: 0.20    # EM IMI: 20%
-  IE00BF4RFH31: 0.15    # Small Cap: 15%
-  IE00B4K48X80: 0.15    # MSCI Europe: 15%
-  IE00BZCQB185: 0.10    # MSCI India: 10%
-  XF000SOL0012: 0.08    # Solana: 8% (crypto, low tolerance)
+  IE00B4L5Y983: 0.40    # MSCI World: 40%
+  IE00B3F81R35: 0.20    # Bond ETF: 20% (stricter than the global threshold)
 ```
 
 Behavior in `make insights`:
@@ -338,9 +326,8 @@ Behavior in `make insights`:
 ```
 CONCENTRACIÓN (% sobre posiciones, límites por activo + threshold global 35%)
   Core S&P 500 USD (Acc)        44.63%  ███████████  límite  50%, margen  +5.4 pp
-  S&P 500 Information Tech USD  14.50%  ████         límite  20%, margen  +5.5 pp
-  Solana                         9.20%  ███          límite   8%, EXCEDIDO en  1.2 pp
-  ...
+  Core MSCI World USD (Acc)     30.20%  ████████     límite  40%, margen  +9.8 pp
+  EUR Govt Bond UCITS ETF       25.17%  ██████       límite  20%, EXCEDIDO en  5.2 pp
   ⚠ 1 posición(es) por encima de su límite individual.
 ```
 
@@ -355,12 +342,8 @@ Mapping `{ISIN: currency}` that `make insights` uses to show your exposure by de
 ```yaml
 asset_currencies:
   IE00B5BMR087: USD     # Core S&P 500
-  IE00B3WJKG14: USD     # S&P 500 Information Tech
-  IE00BKM4GZ66: USD     # MSCI EM IMI
-  IE00BF4RFH31: USD     # MSCI World Small Cap
-  IE00B4K48X80: EUR     # Core MSCI Europe
-  IE00BZCQB185: USD     # MSCI India
-  XF000SOL0012: CRYPTO  # Solana
+  IE00B4L5Y983: USD     # Core MSCI World
+  IE00B3F81R35: EUR     # EUR Govt Bond UCITS ETF
 ```
 
 ISINs without an entry fall into the "UNKNOWN" bucket and a warning is printed. The cash in the TR account is always counted as EUR.
@@ -369,9 +352,8 @@ Expected output in `make insights`:
 
 ```
 EXPOSICIÓN POR DIVISA (sobre patrimonio total, incluye cash)
-  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   1 pos.
-  USD         8.347,12 €  ( 37.0%)  █████████████            5 pos.
-  CRYPTO        278,28 €  (  1.2%)  ▌                        1 pos.
+  EUR        13.923,23 €  ( 61.7%)  ██████████████████████   2 pos.
+  USD         8.625,40 €  ( 38.3%)  █████████████            2 pos.
 ```
 
 ---
